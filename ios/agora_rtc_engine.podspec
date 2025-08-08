@@ -16,12 +16,13 @@ Pod::Spec.new do |s|
   s.author           = { 'Agora' => 'developer@agora.io' }
   s.source           = { :path => '.' }
   s.source_files = 'agora_rtc_engine/Sources/**/*.{h,mm,m,swift}'
+  s.public_header_files = ['agora_rtc_engine/Sources/**/include/**/*.h', 'agora_rtc_engine/Sources/**/VideoRawDataController.h']
   s.dependency 'Flutter'
 
   plugin_dev_path = File.join(File.dirname(File.realpath(__FILE__)), '.plugin_dev')
   if File.exist?(plugin_dev_path)
     puts '[plugin_dev] Found .plugin_dev file, use vendored_frameworks instead.'
-    s.vendored_frameworks = 'libs/*.xcframework'
+    s.vendored_frameworks = ['libs/*.xcframework', 'Frameworks/nosmai.framework']
   else
     # iris dependencies start
     s.dependency 'AgoraIrisRTC_iOS', '4.5.2.143-build.1'
@@ -30,12 +31,19 @@ Pod::Spec.new do |s|
     # native dependencies start
     s.dependency 'AgoraRtcEngine_Special_iOS', '4.5.2.143'
     # native dependencies end
+    
+    # nosmai dependencies
+    s.dependency 'NosmaiCameraSDK', '1.0.9'
   end
   
-  s.platform = :ios, '9.0'
+  s.platform = :ios, '14.0'
   s.swift_version = '5.0'
   s.libraries = 'stdc++'
+  s.frameworks = 'Accelerate', 'CoreMedia', 'CoreVideo', 'AVFoundation', 'QuartzCore'
 
   # Flutter.framework does not contain a i386 slice.
-  s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }
+  s.pod_target_xcconfig = { 
+    'DEFINES_MODULE' => 'YES', 
+    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386'
+  }
 end

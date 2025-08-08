@@ -2,6 +2,8 @@
 #import "./include/agora_rtc_engine/AgoraSurfaceViewFactory.h"
 #import "./include/agora_rtc_engine/AgoraUtils.h"
 #import "./include/agora_rtc_engine/VideoViewController.h"
+#import "AgoraNosmaiProcessor.h"
+#import "SimpleNosmaiPreviewFactory.h"
 #include <Foundation/Foundation.h>
 
 @interface AgoraRtcNgPlugin ()
@@ -13,6 +15,10 @@
 @property(nonatomic) NSObject<FlutterPluginRegistrar> *registrar;
 
 @property(nonatomic) AgoraPIPController *pipController;
+
+@property(nonatomic) AgoraNosmaiProcessor *nosmaiProcessor;
+
+@property(nonatomic) SimpleNosmaiPreviewFactory *nosmaiPreviewFactory;
 
 @end
 
@@ -52,6 +58,8 @@
     [self getAssetAbsolutePath:call result:result];
   } else if ([call.method hasPrefix:@"pip"]) {
     [self handlePipMethodCall:call result:result];
+  } else if ([call.method hasPrefix:@"nosmai"]) {
+    [self handleNosmaiMethodCall:call result:result];
   } else {
     result(FlutterMethodNotImplemented);
   }
@@ -260,6 +268,806 @@
       initWithObjectsAndKeys:[NSNumber numberWithLong:(long)state], @"state",
                              error, @"error", nil];
   [self.channel invokeMethod:@"pipStateChanged" arguments:arguments];
+}
+
+#pragma mark - Nosmai Methods
+
+- (void)handleNosmaiMethodCall:(FlutterMethodCall *)call
+                        result:(FlutterResult)result {
+  if ([@"nosmaiInitialize" isEqualToString:call.method]) {
+    [self nosmaiInitialize:call result:result];
+  } else if ([@"nosmaiStartProcessing" isEqualToString:call.method]) {
+    [self nosmaiStartProcessing:call result:result];
+  } else if ([@"nosmaiStopProcessing" isEqualToString:call.method]) {
+    [self nosmaiStopProcessing:call result:result];
+  } else if ([@"nosmaiStartStreaming" isEqualToString:call.method]) {
+    [self nosmaiStartStreaming:call result:result];
+  } else if ([@"nosmaiStopStreaming" isEqualToString:call.method]) {
+    [self nosmaiStopStreaming:call result:result];
+  } else if ([@"nosmaiApplyFilter" isEqualToString:call.method]) {
+    [self nosmaiApplyFilter:call result:result];
+  } else if ([@"nosmaiClearFilter" isEqualToString:call.method]) {
+    [self nosmaiClearFilter:call result:result];
+  } else if ([@"nosmaiGetAvailableFilters" isEqualToString:call.method]) {
+    [self nosmaiGetAvailableFilters:call result:result];
+  } else if ([@"nosmaiApplySkinSmoothing" isEqualToString:call.method]) {
+    [self nosmaiApplySkinSmoothing:call result:result];
+  } else if ([@"nosmaiApplyFaceSlimming" isEqualToString:call.method]) {
+    [self nosmaiApplyFaceSlimming:call result:result];
+  } else if ([@"nosmaiApplyEyeEnlargement" isEqualToString:call.method]) {
+    [self nosmaiApplyEyeEnlargement:call result:result];
+  } else if ([@"nosmaiClearBeautyEffects" isEqualToString:call.method]) {
+    [self nosmaiClearBeautyEffects:call result:result];
+  } else if ([@"nosmaiSwitchCamera" isEqualToString:call.method]) {
+    [self nosmaiSwitchCamera:call result:result];
+  } else if ([@"nosmaiEnableMirror" isEqualToString:call.method]) {
+    [self nosmaiEnableMirror:call result:result];
+  } else if ([@"nosmaiEnableLocalPreview" isEqualToString:call.method]) {
+    [self nosmaiEnableLocalPreview:call result:result];
+  } else if ([@"nosmaiSetPreviewView" isEqualToString:call.method]) {
+    [self nosmaiSetPreviewView:call result:result];
+  } else if ([@"nosmaiGetProcessingMetrics" isEqualToString:call.method]) {
+    [self nosmaiGetProcessingMetrics:call result:result];
+  } else if ([@"nosmaiIsProcessing" isEqualToString:call.method]) {
+    [self nosmaiIsProcessing:call result:result];
+  } else if ([@"nosmaiIsStreaming" isEqualToString:call.method]) {
+    [self nosmaiIsStreaming:call result:result];
+  } else if ([@"nosmaiSetAgoraEngine" isEqualToString:call.method]) {
+    [self nosmaiSetAgoraEngine:call result:result];
+  } else if ([@"nosmaiCreateCustomEngine" isEqualToString:call.method]) {
+    [self nosmaiCreateCustomEngine:call result:result];
+  } else if ([@"nosmaiGetCustomEngine" isEqualToString:call.method]) {
+    [self nosmaiGetCustomEngine:call result:result];
+  } else if ([@"nosmaiAttachPreviewToView" isEqualToString:call.method]) {
+    [self nosmaiAttachPreviewToView:call result:result];
+  } else if ([@"nosmaiInjectPreviewIntoView" isEqualToString:call.method]) {
+    [self nosmaiInjectPreviewIntoView:call result:result];
+  } else if ([@"nosmaiGetLocalFilters" isEqualToString:call.method]) {
+    [self nosmaiGetLocalFilters:call result:result];
+  } else if ([@"nosmaiGetCloudFilters" isEqualToString:call.method]) {
+    [self nosmaiGetCloudFilters:call result:result];
+  } else if ([@"nosmaiDownloadCloudFilter" isEqualToString:call.method]) {
+    [self nosmaiDownloadCloudFilter:call result:result];
+  } else if ([@"nosmaiGetFilters" isEqualToString:call.method]) {
+    [self nosmaiGetFilters:call result:result];
+  } else if ([@"nosmaiClearFilterCache" isEqualToString:call.method]) {
+    [self nosmaiClearFilterCache:call result:result];
+  } else if ([@"nosmaiApplySkinWhitening" isEqualToString:call.method]) {
+    [self nosmaiApplySkinWhitening:call result:result];
+  } else if ([@"nosmaiApplyNoseSize" isEqualToString:call.method]) {
+    [self nosmaiApplyNoseSize:call result:result];
+  } else if ([@"nosmaiApplyBrightnessFilter" isEqualToString:call.method]) {
+    [self nosmaiApplyBrightnessFilter:call result:result];
+  } else if ([@"nosmaiApplyContrastFilter" isEqualToString:call.method]) {
+    [self nosmaiApplyContrastFilter:call result:result];
+  } else if ([@"nosmaiApplyRGBFilter" isEqualToString:call.method]) {
+    [self nosmaiApplyRGBFilter:call result:result];
+  } else if ([@"nosmaiApplySharpening" isEqualToString:call.method]) {
+    [self nosmaiApplySharpening:call result:result];
+  } else if ([@"nosmaiApplyMakeupBlendLevel" isEqualToString:call.method]) {
+    [self nosmaiApplyMakeupBlendLevel:call result:result];
+  } else if ([@"nosmaiApplyGrayscaleFilter" isEqualToString:call.method]) {
+    [self nosmaiApplyGrayscaleFilter:call result:result];
+  } else if ([@"nosmaiApplyHue" isEqualToString:call.method]) {
+    [self nosmaiApplyHue:call result:result];
+  } else if ([@"nosmaiApplyWhiteBalance" isEqualToString:call.method]) {
+    [self nosmaiApplyWhiteBalance:call result:result];
+  } else if ([@"nosmaiAdjustHSB" isEqualToString:call.method]) {
+    [self nosmaiAdjustHSB:call result:result];
+  } else if ([@"nosmaiResetHSBFilter" isEqualToString:call.method]) {
+    [self nosmaiResetHSBFilter:call result:result];
+  } else if ([@"nosmaiRemoveBuiltInFilters" isEqualToString:call.method]) {
+    [self nosmaiRemoveBuiltInFilters:call result:result];
+  } else if ([@"nosmaiIsBeautyFilterEnabled" isEqualToString:call.method]) {
+    [self nosmaiIsBeautyFilterEnabled:call result:result];
+  } else if ([@"nosmaiIsCloudFilterEnabled" isEqualToString:call.method]) {
+    [self nosmaiIsCloudFilterEnabled:call result:result];
+  } else {
+    result(FlutterMethodNotImplemented);
+  }
+}
+
+- (void)nosmaiInitialize:(FlutterMethodCall *)call result:(FlutterResult)result {
+  NSLog(@"🔧 [AgoraRtcNgPlugin] nosmaiInitialize called");
+  
+  NSDictionary *arguments = call.arguments;
+  NSLog(@"🔧 [AgoraRtcNgPlugin] Arguments: %@", arguments);
+  
+  void *apiEnginePtr = [[arguments objectForKey:@"apiEngine"] pointerValue];
+  void *agoraEnginePtr = [[arguments objectForKey:@"agoraEngine"] pointerValue];
+  NSString *licenseKey = [arguments objectForKey:@"licenseKey"];
+  
+  NSLog(@"🔧 [AgoraRtcNgPlugin] API Engine pointer: %p", apiEnginePtr);
+  NSLog(@"🔧 [AgoraRtcNgPlugin] Agora Engine pointer: %p", agoraEnginePtr);
+  NSLog(@"🔧 [AgoraRtcNgPlugin] License key: %@", licenseKey);
+  
+  if (licenseKey) {
+    NSLog(@"🔧 [AgoraRtcNgPlugin] Creating AgoraNosmaiProcessor...");
+    
+    // Use the AgoraRtcEngineKit instance passed from Flutter if available
+    if (agoraEnginePtr) {
+      AgoraRtcEngineKit *agoraEngine = (__bridge AgoraRtcEngineKit *)agoraEnginePtr;
+      NSLog(@"🔧 [AgoraRtcNgPlugin] Using AgoraRtcEngineKit instance from Flutter: %@", agoraEngine);
+      self.nosmaiProcessor = [[AgoraNosmaiProcessor alloc] initWithAgoraEngine:agoraEngine licenseKey:licenseKey];
+    } else if (apiEnginePtr) {
+      NSLog(@"⚠️ [AgoraRtcNgPlugin] No AgoraRtcEngineKit instance provided, using API engine pointer as fallback");
+      self.nosmaiProcessor = [[AgoraNosmaiProcessor alloc] initWithApiEngine:apiEnginePtr licenseKey:licenseKey];
+    } else {
+      NSLog(@"❌ [AgoraRtcNgPlugin] No engine instance provided");
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                                 message:@"Either AgoraRtcEngineKit instance or API Engine pointer is required"
+                                 details:nil]);
+      return;
+    }
+    
+    NSLog(@"🔧 [AgoraRtcNgPlugin] AgoraNosmaiProcessor created: %@", self.nosmaiProcessor);
+    
+    // Register the simple Nosmai preview factory
+    self.nosmaiPreviewFactory = [[SimpleNosmaiPreviewFactory alloc] init];
+    [self.registrar registerViewFactory:self.nosmaiPreviewFactory
+                                 withId:@"SimpleNosmaiPreview"];
+    NSLog(@"✅ [AgoraRtcNgPlugin] SimpleNosmaiPreview platform view registered");
+    
+    result(@YES);
+  } else {
+    NSLog(@"❌ [AgoraRtcNgPlugin] Missing license key");
+    result([FlutterError errorWithCode:@"InvalidArgument"
+                               message:@"License key is required"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiStartProcessing:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    [self.nosmaiProcessor startProcessing];
+    result(@YES);
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiStopProcessing:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    [self.nosmaiProcessor stopProcessing];
+    result(@YES);
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiStartStreaming:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    [self.nosmaiProcessor startLiveStreaming];
+    result(@YES);
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiStopStreaming:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    [self.nosmaiProcessor stopLiveStreaming];
+    result(@YES);
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiApplyFilter:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSString *filterPath = call.arguments[@"path"];
+    if (filterPath) {
+      [self.nosmaiProcessor applyFilterWithPath:filterPath completion:^(BOOL success, NSError *error) {
+        if (success) {
+          result(@YES);
+        } else {
+          result([FlutterError errorWithCode:@"FilterApplyFailed"
+                                     message:error.localizedDescription
+                                     details:nil]);
+        }
+      }];
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                               message:@"Filter path is required"
+                               details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiClearFilter:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    [self.nosmaiProcessor clearFilter];
+    result(@YES);
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiGetAvailableFilters:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSDictionary *filters = [self.nosmaiProcessor getAvailableFilters];
+    result(filters ?: @{});
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiApplySkinSmoothing:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSNumber *intensity = call.arguments[@"intensity"];
+    if (intensity) {
+      [self.nosmaiProcessor applySkinSmoothing:[intensity floatValue]];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                               message:@"Intensity value is required"
+                               details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiApplyFaceSlimming:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSNumber *intensity = call.arguments[@"intensity"];
+    if (intensity) {
+      [self.nosmaiProcessor applyFaceSlimming:[intensity floatValue]];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                               message:@"Intensity value is required"
+                               details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiApplyEyeEnlargement:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSNumber *intensity = call.arguments[@"intensity"];
+    if (intensity) {
+      [self.nosmaiProcessor applyEyeEnlargement:[intensity floatValue]];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                               message:@"Intensity value is required"
+                               details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiClearBeautyEffects:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    [self.nosmaiProcessor clearBeautyEffects];
+    result(@YES);
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiSwitchCamera:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    BOOL success = [self.nosmaiProcessor switchCamera];
+    result(@(success));
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiEnableMirror:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSNumber *enable = call.arguments[@"enable"];
+    if (enable) {
+      [self.nosmaiProcessor enableMirror:[enable boolValue]];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                               message:@"Enable value is required"
+                               details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiEnableLocalPreview:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSNumber *enable = call.arguments[@"enable"];
+    if (enable) {
+      [self.nosmaiProcessor enableLocalPreview:[enable boolValue]];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                               message:@"Enable value is required"
+                               details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiSetPreviewView:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    void *viewPtr = [[call.arguments objectForKey:@"view"] pointerValue];
+    if (viewPtr) {
+      UIView *view = (__bridge UIView *)viewPtr;
+      [self.nosmaiProcessor setPreviewView:view];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                               message:@"View pointer is required"
+                               details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiGetProcessingMetrics:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSDictionary *metrics = [self.nosmaiProcessor getProcessingMetrics];
+    result(metrics ?: @{});
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiIsProcessing:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    result(@([self.nosmaiProcessor isProcessing]));
+  } else {
+    result(@NO);
+  }
+}
+
+- (void)nosmaiIsStreaming:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    result(@([self.nosmaiProcessor isStreaming]));
+  } else {
+    result(@NO);
+  }
+}
+
+- (void)nosmaiSetAgoraEngine:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    void *agoraEnginePtr = [[call.arguments objectForKey:@"agoraEngine"] pointerValue];
+    if (agoraEnginePtr) {
+      AgoraRtcEngineKit *agoraEngine = (__bridge AgoraRtcEngineKit *)agoraEnginePtr;
+      NSLog(@"🔧 [AgoraRtcNgPlugin] Setting AgoraRtcEngineKit instance from Flutter: %@", agoraEngine);
+      [self.nosmaiProcessor setAgoraEngineInstance:agoraEngine];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                                 message:@"AgoraRtcEngineKit pointer is required"
+                                 details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiCreateCustomEngine:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSString *appId = [call.arguments objectForKey:@"appId"];
+    if (appId) {
+      NSLog(@"🔧 [AgoraRtcNgPlugin] Creating custom AgoraRtcEngineKit with AppID: %@", appId);
+      [self.nosmaiProcessor createCustomAgoraEngine:appId];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                                 message:@"AppID is required"
+                                 details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiGetCustomEngine:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    AgoraRtcEngineKit *customEngine = [self.nosmaiProcessor getCustomEngine];
+    if (customEngine) {
+      // Return the engine pointer as a number that Flutter can use
+      NSNumber *enginePointer = [NSNumber numberWithLongLong:(long long)customEngine];
+      result(enginePointer);
+    } else {
+      result([FlutterError errorWithCode:@"NoCustomEngine"
+                                 message:@"Custom engine not created yet"
+                                 details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiAttachPreviewToView:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    // For now, we'll need to implement a way to get the view reference
+    // This is tricky from Flutter side, we might need a different approach
+    NSLog(@"🔧 [AgoraRtcNgPlugin] nosmaiAttachPreviewToView called - implementation needed");
+    result(@YES);
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiInjectPreviewIntoView:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSNumber *viewIdNumber = [call.arguments objectForKey:@"viewId"];
+    if (viewIdNumber) {
+      int viewId = [viewIdNumber intValue];
+      NSLog(@"🔧 [AgoraRtcNgPlugin] Injecting Nosmai preview into view ID: %d", viewId);
+      
+      // For now, we'll use a different approach since we can't easily access the platform view
+      // Let's use the global preview view approach instead
+      NSLog(@"⚠️ [AgoraRtcNgPlugin] Platform view injection not yet implemented");
+      NSLog(@"🔄 [AgoraRtcNgPlugin] Using global preview approach instead");
+      
+      // This will work if the frames are being displayed in the global preview view
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                                 message:@"viewId is required"
+                                 details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+#pragma mark - Filter Management Methods
+
+- (void)nosmaiGetLocalFilters:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSArray *localFilters = [self.nosmaiProcessor getLocalFilters];
+    result(localFilters);
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiGetCloudFilters:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSArray *cloudFilters = [self.nosmaiProcessor getCloudFilters];
+    result(cloudFilters);
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiDownloadCloudFilter:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSString *filterId = call.arguments[@"filterId"];
+    if (filterId) {
+      NSDictionary *downloadResult = [self.nosmaiProcessor downloadCloudFilter:filterId];
+      result(downloadResult);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                                 message:@"Filter ID is required"
+                                 details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiGetFilters:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSArray *filters = [self.nosmaiProcessor getFilters];
+    result(filters);
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiClearFilterCache:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    [self.nosmaiProcessor clearFilterCache];
+    result(@YES);
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+#pragma mark - Extended Beauty and Filter Effects
+
+- (void)nosmaiApplySkinWhitening:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSNumber *intensity = call.arguments[@"intensity"];
+    if (intensity) {
+      [self.nosmaiProcessor applySkinWhitening:[intensity floatValue]];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                                 message:@"Intensity value is required"
+                                 details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiApplyNoseSize:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSNumber *intensity = call.arguments[@"intensity"];
+    if (intensity) {
+      [self.nosmaiProcessor applyNoseSize:[intensity floatValue]];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                                 message:@"Intensity value is required"
+                                 details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiApplyBrightnessFilter:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSNumber *brightness = call.arguments[@"brightness"];
+    if (brightness) {
+      [self.nosmaiProcessor applyBrightnessFilter:[brightness floatValue]];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                                 message:@"Brightness value is required"
+                                 details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiApplyContrastFilter:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSNumber *contrast = call.arguments[@"contrast"];
+    if (contrast) {
+      [self.nosmaiProcessor applyContrastFilter:[contrast floatValue]];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                                 message:@"Contrast value is required"
+                                 details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiApplyRGBFilter:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSNumber *red = call.arguments[@"red"];
+    NSNumber *green = call.arguments[@"green"];
+    NSNumber *blue = call.arguments[@"blue"];
+    if (red && green && blue) {
+      [self.nosmaiProcessor applyRGBFilter:[red floatValue] green:[green floatValue] blue:[blue floatValue]];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                                 message:@"RGB values are required"
+                                 details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiApplySharpening:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSNumber *level = call.arguments[@"level"];
+    if (level) {
+      [self.nosmaiProcessor applySharpening:[level floatValue]];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                                 message:@"Sharpening level is required"
+                                 details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiApplyMakeupBlendLevel:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSString *filterName = call.arguments[@"filterName"];
+    NSNumber *level = call.arguments[@"level"];
+    if (filterName && level) {
+      [self.nosmaiProcessor applyMakeupBlendLevel:filterName level:[level floatValue]];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                                 message:@"Filter name and level are required"
+                                 details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiApplyGrayscaleFilter:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    [self.nosmaiProcessor applyGrayscaleFilter];
+    result(@YES);
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiApplyHue:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSNumber *hueAngle = call.arguments[@"hueAngle"];
+    if (hueAngle) {
+      [self.nosmaiProcessor applyHue:[hueAngle floatValue]];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                                 message:@"Hue angle is required"
+                                 details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiApplyWhiteBalance:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSNumber *temperature = call.arguments[@"temperature"];
+    NSNumber *tint = call.arguments[@"tint"];
+    if (temperature && tint) {
+      [self.nosmaiProcessor applyWhiteBalance:[temperature floatValue] tint:[tint floatValue]];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                                 message:@"Temperature and tint values are required"
+                                 details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiAdjustHSB:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    NSNumber *hue = call.arguments[@"hue"];
+    NSNumber *saturation = call.arguments[@"saturation"];
+    NSNumber *brightness = call.arguments[@"brightness"];
+    if (hue && saturation && brightness) {
+      [self.nosmaiProcessor adjustHSB:[hue floatValue] saturation:[saturation floatValue] brightness:[brightness floatValue]];
+      result(@YES);
+    } else {
+      result([FlutterError errorWithCode:@"InvalidArgument"
+                                 message:@"HSB values are required"
+                                 details:nil]);
+    }
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiResetHSBFilter:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    [self.nosmaiProcessor resetHSBFilter];
+    result(@YES);
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiRemoveBuiltInFilters:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    [self.nosmaiProcessor removeBuiltInFilters];
+    result(@YES);
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiIsBeautyFilterEnabled:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    BOOL isEnabled = [self.nosmaiProcessor isBeautyFilterEnabled];
+    result(@(isEnabled));
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
+}
+
+- (void)nosmaiIsCloudFilterEnabled:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (self.nosmaiProcessor) {
+    BOOL isEnabled = [self.nosmaiProcessor isCloudFilterEnabled];
+    result(@(isEnabled));
+  } else {
+    result([FlutterError errorWithCode:@"NotInitialized"
+                               message:@"Nosmai processor not initialized"
+                               details:nil]);
+  }
 }
 
 @end
