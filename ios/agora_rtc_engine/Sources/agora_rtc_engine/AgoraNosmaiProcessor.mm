@@ -1002,9 +1002,6 @@ static NosmaiPreviewView *globalPreviewView = nil;
 #pragma mark - Camera Controls
 
 - (BOOL)switchCamera {
-          self.isUsingFrontCamera ? @"front" : @"back",
-          self.isUsingFrontCamera ? @"back" : @"front");
-    
     // Initialize camera if not already done
     if (!self.captureSession) {
         [self setupCustomCamera];
@@ -1089,7 +1086,6 @@ static NosmaiPreviewView *globalPreviewView = nil;
             }
         }
         
-              self.isUsingFrontCamera ? @"front" : @"back");
         return YES;
         
     } else {
