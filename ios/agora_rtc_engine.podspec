@@ -22,7 +22,8 @@ Pod::Spec.new do |s|
   plugin_dev_path = File.join(File.dirname(File.realpath(__FILE__)), '.plugin_dev')
   if File.exist?(plugin_dev_path)
     puts '[plugin_dev] Found .plugin_dev file, use vendored_frameworks instead.'
-    s.vendored_frameworks = ['libs/*.xcframework', 'Frameworks/nosmai.framework']
+    s.vendored_frameworks = ['libs/*.xcframework']
+    s.dependency 'nosmai-camera-sdk-ios', '1.0.9'
   else
     # iris dependencies start
     s.dependency 'AgoraIrisRTC_iOS', '4.5.2.143-build.1'
@@ -33,7 +34,7 @@ Pod::Spec.new do |s|
     # native dependencies end
     
     # nosmai framework
-    s.vendored_frameworks = 'Frameworks/nosmai.framework'
+    s.dependency 'nosmai-camera-sdk-ios', '1.0.9'
   end
   
   s.platform = :ios, '14.0'
@@ -44,9 +45,6 @@ Pod::Spec.new do |s|
   # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = { 
     'DEFINES_MODULE' => 'YES', 
-    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
-    'FRAMEWORK_SEARCH_PATHS' => '$(inherited) $(SRCROOT)/../ios/Frameworks',
-    'HEADER_SEARCH_PATHS' => '$(inherited) $(SRCROOT)/../ios/Frameworks/nosmai.framework/Headers',
-    'OTHER_LDFLAGS' => '$(inherited) -framework nosmai'
+    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386'
   }
 end
