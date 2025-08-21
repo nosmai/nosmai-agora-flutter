@@ -52,6 +52,7 @@ static BOOL isNosmaiSDKInitialized = NO;
 
 
 + (AgoraRtcEngineKit *)sharedNativeSingletonEngine;
++ (AgoraRtcEngineKit *)sharedNativeSingletonEngine:(NSString *)appId;
 
 @end
 
@@ -59,42 +60,47 @@ static BOOL isNosmaiSDKInitialized = NO;
 
 #pragma mark - Singleton Engine (Architecture)
 
-+ (AgoraRtcEngineKit *)sharedNativeSingletonEngine {
++ (AgoraRtcEngineKit *)sharedNativeSingletonEngine:(NSString *)appId {
     static AgoraRtcEngineKit *_singletonEngine = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        NSLog(@"🏭 Creating native singleton AgoraRtcEngineKit (architecture)");
+        NSLog(@"🏭 Creating native singleton AgoraRtcEngineKit with App ID: %@", appId);
         
-        // Create the singleton engine with our App ID
-        NSString *appId = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"AgoraAppId"] ?: @"";
-        if (appId.length == 0) {
-            NSLog(@"❌ AgoraAppId not found in Info.plist");
-            return nil;
-        }
-        _singletonEngine = [AgoraRtcEngineKit sharedEngineWithAppId:appId delegate:nil];
-        
-        if (_singletonEngine) {
-            NSLog(@"✅ Native singleton engine created (address: %p)", _singletonEngine);
+        // Create the singleton engine with the provided App ID
+        if (appId && appId.length > 0) {
+            _singletonEngine = [AgoraRtcEngineKit sharedEngineWithAppId:appId delegate:nil];
             
-            // Configure external video source ONCE for the singleton engine
-            [_singletonEngine setExternalVideoSource:YES useTexture:NO sourceType:AgoraExternalVideoSourceTypeVideoFrame];
-            
-            // Configure video encoder for mobile portrait
-            AgoraVideoEncoderConfiguration *config = [[AgoraVideoEncoderConfiguration alloc] init];
-            config.dimensions = CGSizeMake(720, 1280);
-            config.frameRate = AgoraVideoFrameRateFps15;
-            config.bitrate = AgoraVideoBitrateStandard;
-            config.orientationMode = AgoraVideoOutputOrientationModeFixedPortrait;
-            [_singletonEngine setVideoEncoderConfiguration:config];
-            
-            [_singletonEngine enableVideo];
-            NSLog(@"🔧 Native singleton engine configured for NosmaiSDK integration");
+            if (_singletonEngine) {
+                NSLog(@"✅ Native singleton engine created (address: %p)", _singletonEngine);
+                
+                // Configure external video source ONCE for the singleton engine
+                [_singletonEngine setExternalVideoSource:YES useTexture:NO sourceType:AgoraExternalVideoSourceTypeVideoFrame];
+                
+                // Configure video encoder for mobile portrait
+                AgoraVideoEncoderConfiguration *config = [[AgoraVideoEncoderConfiguration alloc] init];
+                config.dimensions = CGSizeMake(720, 1280);
+                config.frameRate = AgoraVideoFrameRateFps15;
+                config.bitrate = AgoraVideoBitrateStandard;
+                config.orientationMode = AgoraVideoOutputOrientationModeFixedPortrait;
+                [_singletonEngine setVideoEncoderConfiguration:config];
+                
+                [_singletonEngine enableVideo];
+                NSLog(@"🔧 Native singleton engine configured for NosmaiSDK integration");
+            } else {
+                NSLog(@"❌ Failed to create native singleton engine");
+            }
         } else {
-            NSLog(@"❌ Failed to create native singleton engine");
+            NSLog(@"❌ No App ID provided, cannot create singleton engine");
         }
     });
     
     return _singletonEngine;
+}
+
++ (AgoraRtcEngineKit *)sharedNativeSingletonEngine {
+    // Backward compatibility: fallback to Info.plist if no App ID provided
+    NSString *appId = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"AgoraAppId"] ?: @"";
+    return [self sharedNativeSingletonEngine:appId];
 }
 
 - (instancetype)initWithApiEngine:(void *)apiEngine licenseKey:(NSString *)licenseKey {
@@ -185,11 +191,11 @@ static BOOL isNosmaiSDKInitialized = NO;
 }
 
 - (void)createCustomAgoraEngine:(NSString *)appId {
-    NSLog(@"🔧 createCustomAgoraEngine called - using native singleton approach");
+    NSLog(@"🔧 createCustomAgoraEngine called with appId: %@", appId);
     
     // NATIVE SINGLETON APPROACH (Architecture)
-    // Always use the same native singleton engine - never recreate it
-    self.agoraEngine = [[self class] sharedNativeSingletonEngine];
+    // Use the singleton engine with provided App ID instead of Info.plist
+    self.agoraEngine = [[self class] sharedNativeSingletonEngine:appId];
     
     if (self.agoraEngine) {
         NSLog(@"✅ Connected to native singleton engine (address: %p)", self.agoraEngine);
