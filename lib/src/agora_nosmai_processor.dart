@@ -1177,6 +1177,22 @@ class NosmaiEffect {
     }
   }
 
+  /// Stop the Nosmai preview
+  ///
+  /// This method stops the preview while maintaining stream continuity
+  /// for smooth transition from preview to live streaming.
+  Future<bool> stopNosmaiPreview() async {
+    if (!_isInitialized) return false;
+
+    try {
+      final result = await _channel.invokeMethod('stopNosmaiPreview');
+      return result == true;
+    } catch (e) {
+      print('Failed to stop Nosmai preview: $e');
+      return false;
+    }
+  }
+
   /// Dispose the processor and clean up resources
   Future<void> dispose() async {
     if (_isInitialized) {

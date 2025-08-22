@@ -26,7 +26,7 @@ Pod::Spec.new do |s|
     s.vendored_frameworks = ['libs/*.xcframework']
   else
     # iris dependencies start
-    s.dependency 'AgoraIrisRTC_iOS', '4.5.2.143-build.1'
+    s.dependency 'AgoraIrisRTC_iOS', '4.5.2.145-build.1'
     # iris dependencies end
 
     # native dependencies start
@@ -45,6 +45,7 @@ Pod::Spec.new do |s|
   # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = { 
     'DEFINES_MODULE' => 'YES', 
-    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386'
+    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386 x86_64 arm64',
+    'VALID_ARCHS[sdk=iphoneos*]' => 'arm64'
   }
 end
