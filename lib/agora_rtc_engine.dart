@@ -25,3 +25,4 @@ export 'src/agora_rtc_engine_ext.dart';
 export 'src/nosmai_integration.dart';
 export 'src/nosmai_camera_preview.dart';
 export 'src/nosmai_video_view.dart';
+export 'src/nosmai_types.dart';
