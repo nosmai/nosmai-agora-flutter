@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'nosmai_integration.dart';
 import 'nosmai_types.dart';
 
@@ -35,8 +34,15 @@ class _NosmaiCameraPreviewState extends State<NosmaiCameraPreview> {
   @override
   void initState() {
     super.initState();
+    // Camera will be auto-started by the native platform view
+    // The platform view handles camera initialization automatically
     if (widget.autoStart) {
-      _startCamera();
+      // Wait a bit then start camera preview (this triggers standalone mode detection)
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          _startCamera();
+        }
+      });
     }
   }
 
@@ -104,7 +110,7 @@ class _NosmaiCameraPreviewState extends State<NosmaiCameraPreview> {
   /// Start camera preview programmatically
   Future<void> startPreview() => _startCamera();
 
-  /// Stop camera preview programmatically  
+  /// Stop camera preview programmatically
   Future<void> stopPreview() => _stopCamera();
 
   /// Switch between front and back camera
@@ -120,7 +126,6 @@ class _NosmaiCameraPreviewState extends State<NosmaiCameraPreview> {
       return false;
     }
   }
-
 
   /// Set flash mode with typed enum
   Future<bool> setFlashMode(NosmaiFlashMode mode) async {
@@ -178,14 +183,10 @@ class _NosmaiCameraPreviewState extends State<NosmaiCameraPreview> {
     if (defaultTargetPlatform == TargetPlatform.android) {
       return const AndroidView(
         viewType: 'nosmai_native_camera',
-        creationParams: {},
-        creationParamsCodec: StandardMessageCodec(),
       );
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
       return const UiKitView(
-        viewType: 'nosmai/camera_preview',
-        creationParams: {},
-        creationParamsCodec: StandardMessageCodec(),
+        viewType: 'nosmai_native_camera',
       );
     } else {
       return const Center(
