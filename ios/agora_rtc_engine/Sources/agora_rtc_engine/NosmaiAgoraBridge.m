@@ -1499,6 +1499,8 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 }
 
 - (BOOL)setTorchMode:(NSString *)torchMode {
+    // Previous Nosmai-based torch implementation (commented out)
+    /*
 #if HAS_NOSMAI_FRAMEWORK
     @try {
         
@@ -1538,6 +1540,60 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 #else
     return NO;
 #endif
+    */
+    
+    // Native iOS torch implementation
+    @try {
+        // Get current capture device
+        AVCaptureDevice *currentDevice = nil;
+        
+        if (self.captureDevice) {
+            // Use the device from our capture session
+            currentDevice = self.captureDevice;
+        } else {
+            // Fallback: get the default video device
+            currentDevice = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+        }
+        
+        if (!currentDevice) {
+            return NO;
+        }
+        
+        // Check if device has torch capability
+        if (![currentDevice hasTorch]) {
+            return NO;
+        }
+        
+        // Convert string to AVCaptureTorchMode
+        AVCaptureTorchMode mode = AVCaptureTorchModeOff;
+        if ([torchMode isEqualToString:@"auto"]) {
+            mode = AVCaptureTorchModeAuto;
+        } else if ([torchMode isEqualToString:@"on"]) {
+            mode = AVCaptureTorchModeOn;
+        }
+        
+        // Check if the mode is supported
+        if (![currentDevice isTorchModeSupported:mode]) {
+            return NO;
+        }
+        
+        // Lock device for configuration
+        NSError *error = nil;
+        if (![currentDevice lockForConfiguration:&error]) {
+            return NO;
+        }
+        
+        // Set torch mode
+        currentDevice.torchMode = mode;
+        
+        // Unlock device
+        [currentDevice unlockForConfiguration];
+        
+        return YES;
+        
+    } @catch (NSException *exception) {
+        return NO;
+    }
 }
 
 #pragma mark - Missing Nosmai Camera Methods
@@ -1947,6 +2003,8 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 }
 
 - (BOOL)hasTorch {
+    // Previous Nosmai-based torch capability check (commented out)
+    /*
 #if HAS_NOSMAI_FRAMEWORK
     @try {
         // Check device capability using static method
@@ -1957,6 +2015,30 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     }
 #endif
     return NO;
+    */
+    
+    // Native iOS torch capability check
+    @try {
+        // Get current capture device
+        AVCaptureDevice *currentDevice = nil;
+        
+        if (self.captureDevice) {
+            // Use the device from our capture session
+            currentDevice = self.captureDevice;
+        } else {
+            // Fallback: check default video device
+            currentDevice = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+        }
+        
+        if (!currentDevice) {
+            return NO;
+        }
+        
+        return [currentDevice hasTorch];
+        
+    } @catch (NSException *exception) {
+        return NO;
+    }
 }
 
 - (NSString *)getFlashMode {
@@ -1975,6 +2057,8 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 }
 
 - (NSString *)getTorchMode {
+    // Previous Nosmai-based torch mode getter (commented out)
+    /*
 #if HAS_NOSMAI_FRAMEWORK
     @try {
         // Note: NosmaiCamera doesn't provide getter for torch mode
@@ -1987,6 +2071,39 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 #else
     return @"off";
 #endif
+    */
+    
+    // Native iOS torch mode getter
+    @try {
+        // Get current capture device
+        AVCaptureDevice *currentDevice = nil;
+        
+        if (self.captureDevice) {
+            // Use the device from our capture session
+            currentDevice = self.captureDevice;
+        } else {
+            // Fallback: get the default video device
+            currentDevice = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+        }
+        
+        if (!currentDevice || ![currentDevice hasTorch]) {
+            return @"off";
+        }
+        
+        // Convert AVCaptureTorchMode to string
+        switch (currentDevice.torchMode) {
+            case AVCaptureTorchModeOn:
+                return @"on";
+            case AVCaptureTorchModeAuto:
+                return @"auto";
+            case AVCaptureTorchModeOff:
+            default:
+                return @"off";
+        }
+        
+    } @catch (NSException *exception) {
+        return @"off";
+    }
 }
 
 - (BOOL)configureCameraWithPosition:(NSString *)position sessionPreset:(NSString *)sessionPreset {

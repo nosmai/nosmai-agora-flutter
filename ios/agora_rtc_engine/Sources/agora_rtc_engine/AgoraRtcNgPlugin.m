@@ -29,9 +29,17 @@
                           withId:@"AgoraSurfaceView"];
     
   // Register Nosmai Camera View Factory for iOS platform views
-  [registrar registerViewFactory:[[NosmaiCameraViewFactory alloc]
-                        initWithMessenger:[registrar messenger]]
-                          withId:@"nosmai/camera_preview"];
+  // Register both view types for different use cases
+  NosmaiCameraViewFactory *nosmaiFactory = [[NosmaiCameraViewFactory alloc]
+                        initWithMessenger:[registrar messenger]];
+  
+  // Register for NosmaiCameraPreview widget
+  [registrar registerViewFactory:nosmaiFactory
+                          withId:@"nosmai_native_camera"];
+  
+  // Register for NosmaiVideoView widget  
+  [registrar registerViewFactory:nosmaiFactory
+                          withId:@"nosmai_camera_preview"];
     
   // Initialize Nosmai Agora Plugin
   [NosmaiAgoraPlugin registerWithRegistrar:registrar];
