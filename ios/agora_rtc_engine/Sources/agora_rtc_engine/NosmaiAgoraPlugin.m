@@ -413,7 +413,26 @@
                     if (localPath && localPath.length > 0) {
                         processedFilter[@"path"] = localPath;
                         processedFilter[@"localPath"] = localPath;
+                        
+                        // Load preview image and convert to base64
+                        UIImage *previewImage = [bridge.nosmaiSDK loadPreviewImageForFilter:localPath];
+                        if (previewImage) {
+                            NSData *imageData = UIImageJPEGRepresentation(previewImage, 0.7);
+                            if (imageData) {
+                                NSString *base64String = [imageData base64EncodedStringWithOptions:0];
+                                processedFilter[@"previewImageBase64"] = base64String;
+                                processedFilter[@"previewUrl"] = base64String;
+                            }
+                        }
                     }
+                }
+                
+                // Set preview URL from original filter data if available
+                if (filter[@"previewUrl"] && ![filter[@"previewUrl"] isKindOfClass:[NSNull class]]) {
+                    processedFilter[@"previewUrl"] = filter[@"previewUrl"];
+                }
+                if (filter[@"thumbnailUrl"] && ![filter[@"thumbnailUrl"] isKindOfClass:[NSNull class]]) {
+                    processedFilter[@"previewUrl"] = filter[@"thumbnailUrl"];
                 }
                 
                 processedFilter[@"type"] = @"cloud";
@@ -537,7 +556,8 @@
             
             NSString *displayName = [self createDisplayNameFromFilterName:filterName];
             filterInfo[@"displayName"] = displayName;
-                        NSError *error = nil;
+            
+            NSError *error = nil;
             NSDictionary *fileAttributes = [[NSFileManager defaultManager] attributesOfItemAtPath:filePath error:&error];
             if (!error && fileAttributes) {
                 filterInfo[@"fileSize"] = fileAttributes[NSFileSize];
@@ -550,6 +570,40 @@
             filterInfo[@"isDownloaded"] = @YES;
             filterInfo[@"isFree"] = @YES;
             filterInfo[@"isBuiltIn"] = @YES;
+            
+            // Try to load preview image from assets first
+            NSString *previewAssetKey = [FlutterDartProject lookupKeyForAsset:[NSString stringWithFormat:@"assets/filters/%@_preview.png", filterName]];
+            NSString *previewPath = [[NSBundle mainBundle] pathForResource:previewAssetKey ofType:nil];
+            
+            BOOL previewLoaded = NO;
+            if (previewPath && [[NSFileManager defaultManager] fileExistsAtPath:previewPath]) {
+                UIImage *previewImage = [UIImage imageWithContentsOfFile:previewPath];
+                if (previewImage) {
+                    NSData *imageData = UIImageJPEGRepresentation(previewImage, 0.7);
+                    if (imageData) {
+                        NSString *base64String = [imageData base64EncodedStringWithOptions:0];
+                        filterInfo[@"previewImageBase64"] = base64String;
+                        filterInfo[@"previewUrl"] = base64String;
+                        previewLoaded = YES;
+                    }
+                }
+            }
+            
+            // If no preview image in assets, try to load from the filter file
+            if (!previewLoaded) {
+                NosmaiAgoraBridge *bridge = [NosmaiAgoraBridge sharedInstance];
+                if (bridge.nosmaiSDK) {
+                    UIImage *previewImage = [bridge.nosmaiSDK loadPreviewImageForFilter:filePath];
+                    if (previewImage) {
+                        NSData *imageData = UIImageJPEGRepresentation(previewImage, 0.7);
+                        if (imageData) {
+                            NSString *base64String = [imageData base64EncodedStringWithOptions:0];
+                            filterInfo[@"previewImageBase64"] = base64String;
+                            filterInfo[@"previewUrl"] = base64String;
+                        }
+                    }
+                }
+            }
             
             [localFilters addObject:[filterInfo copy]];
         }
