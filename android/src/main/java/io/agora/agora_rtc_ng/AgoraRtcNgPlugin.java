@@ -1,27 +1,41 @@
 package io.agora.agora_rtc_ng;
 
+import android.app.Activity;
 import android.content.Context;
+import android.graphics.Rect;
+import android.os.Build;
+import android.util.Rational;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import java.io.IOException;
-import java.lang.ref.WeakReference;
-import java.util.HashMap;
-
+import io.agora.iris.pip.AgoraPIPActivityProxy;
+import io.agora.iris.pip.AgoraPIPController;
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
+import io.flutter.embedding.engine.plugins.activity.ActivityAware;
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding;
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 
-public class AgoraRtcNgPlugin implements FlutterPlugin, MethodChannel.MethodCallHandler {
+import java.io.IOException;
+import java.lang.ref.WeakReference;
+import java.util.HashMap;
+import java.util.Map;
+
+// Nosmai SDK imports
+import com.nosmai.effect.api.NosmaiSDK;
+import com.nosmai.effect.api.NosmaiPreviewView;
+import com.nosmai.effect.api.NosmaiBeauty;
+import com.nosmai.effect.NosmaiEffects;
+
+public class AgoraRtcNgPlugin implements FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware {
 
     private MethodChannel channel;
     private WeakReference<FlutterPluginBinding> flutterPluginBindingRef;
     private VideoViewController videoViewController;
+    private AgoraPIPController pipController;
     @Nullable
     private Context applicationContext;
-
-    private NosmaiAgoraPlugin nosmaiAgoraPlugin;
 
     @Override
     public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
@@ -32,20 +46,6 @@ public class AgoraRtcNgPlugin implements FlutterPlugin, MethodChannel.MethodCall
         videoViewController = new VideoViewController(
                 flutterPluginBinding.getTextureRegistry(),
                 flutterPluginBinding.getBinaryMessenger());
-
-        // Initialize Nosmai Agora Plugin
-        nosmaiAgoraPlugin = new NosmaiAgoraPlugin();
-        nosmaiAgoraPlugin.onAttachedToEngine(flutterPluginBinding);
-
-        // Register native camera preview PlatformView for zero-latency local preview
-        flutterPluginBinding.getPlatformViewRegistry().registerViewFactory(
-                "nosmai_camera_preview",
-                new NosmaiCameraPreviewFactory());
-
-        // Register Nosmai native camera view for camera preview
-        flutterPluginBinding.getPlatformViewRegistry().registerViewFactory(
-                "nosmai_native_camera",
-                new NosmaiNativeCameraFactory());
 
         flutterPluginBinding.getPlatformViewRegistry().registerViewFactory(
                 "AgoraTextureView",
@@ -62,6 +62,16 @@ public class AgoraRtcNgPlugin implements FlutterPlugin, MethodChannel.MethodCall
                         flutterPluginBinding.getBinaryMessenger(),
                         new AgoraPlatformViewFactory.PlatformViewProviderSurfaceView(),
                         this.videoViewController));
+
+        // Register Nosmai-Agora integration plugin
+        NosmaiAgoraPlugin nosmaiPlugin = new NosmaiAgoraPlugin();
+        nosmaiPlugin.onAttachedToEngine(flutterPluginBinding);
+
+        // Register Nosmai native camera view
+        NosmaiAgoraBridge bridge = NosmaiAgoraBridge.getInstance(applicationContext);
+        flutterPluginBinding.getPlatformViewRegistry().registerViewFactory(
+                "nosmai_native_camera",
+                new NosmaiPlatformViewFactory(bridge));
     }
 
     @Override
@@ -69,12 +79,6 @@ public class AgoraRtcNgPlugin implements FlutterPlugin, MethodChannel.MethodCall
         applicationContext = null;
         channel.setMethodCallHandler(null);
         videoViewController.dispose();
-
-        // Dispose Nosmai Agora Plugin
-        if (nosmaiAgoraPlugin != null) {
-            nosmaiAgoraPlugin.onDetachedFromEngine(binding);
-            nosmaiAgoraPlugin = null;
-        }
     }
 
     @Override
@@ -82,12 +86,13 @@ public class AgoraRtcNgPlugin implements FlutterPlugin, MethodChannel.MethodCall
         if ("getAssetAbsolutePath".equals(call.method)) {
             getAssetAbsolutePath(call, result);
         } else if ("androidInit".equals(call.method)) {
-            // dart ffi DynamicLibrary.open do not trigger JNI_OnLoad in iris, so we need
-            // call java
+            // dart ffi DynamicLibrary.open do not trigger JNI_OnLoad in iris, so we need call java
             // System.loadLibrary here to trigger the JNI_OnLoad explicitly.
             System.loadLibrary("AgoraRtcWrapper");
 
             result.success(true);
+        } else if (call.method.startsWith("pip")) {
+            handlePipMethodCall(call, result);
         } else {
             result.notImplemented();
         }
@@ -97,7 +102,8 @@ public class AgoraRtcNgPlugin implements FlutterPlugin, MethodChannel.MethodCall
         final String path = call.arguments();
 
         if (path != null) {
-            if (this.flutterPluginBindingRef.get() != null) {
+            if (this.flutterPluginBindingRef.get() != null
+            ) {
                 final String assetKey = this.flutterPluginBindingRef.get()
                         .getFlutterAssets()
                         .getAssetFilePathByName(path);
@@ -115,5 +121,141 @@ public class AgoraRtcNgPlugin implements FlutterPlugin, MethodChannel.MethodCall
             }
         }
         result.error("IllegalArgumentException", "The parameter should not be null", null);
+    }
+
+    private void initPipController(@NonNull ActivityPluginBinding binding) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
+            Activity activity = binding.getActivity();
+            if (!(activity instanceof AgoraPIPActivityProxy)) {
+                return;
+            }
+
+            if (pipController != null) {
+                pipController.dispose();
+            }
+
+            pipController = new AgoraPIPController(
+                    (AgoraPIPActivityProxy) activity,
+                    new AgoraPIPController.PIPStateChangedListener() {
+                        @Override
+                        public void onPIPStateChangedListener(
+                                AgoraPIPController.PIPState state, String error) {
+                            // put state into a json object
+                            channel.invokeMethod("pipStateChanged",
+                                    new HashMap<String, Object>() {
+                                        {
+                                            put("state", state.getValue());
+                                            put("error", error != null ? error : "");
+                                        }
+                                    });
+                        }
+                    });
+        }
+    }
+
+    private void handlePipMethodCall(@NonNull MethodCall call,
+                                     @NonNull MethodChannel.Result result) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+                pipController == null) {
+            result.error("IllegalStateException", "PiP is not supported",
+                    "Picture-in-Picture mode is not available on this device (requires Android 8.0 or higher) or the main activity does not implement AgoraPIPActivityProxy");
+            return;
+        }
+
+        try {
+            switch (call.method) {
+                case "pipIsSupported":
+                    result.success(pipController.isSupported());
+                    break;
+                case "pipIsAutoEnterSupported":
+                    result.success(pipController.isAutoEnterSupported());
+                    break;
+                case "pipIsActivated":
+                    result.success(pipController.isActivated());
+                    break;
+                case "pipSetup":
+                    final Map<?, ?> args = (Map<?, ?>) call.arguments;
+                    Rational aspectRatio = null;
+                    if (args.get("aspectRatioX") != null &&
+                            args.get("aspectRatioY") != null) {
+                        aspectRatio = new Rational((int) args.get("aspectRatioX"),
+                                (int) args.get("aspectRatioY"));
+                    }
+                    Boolean autoEnterEnabled = null;
+                    if (args.get("autoEnterEnabled") != null) {
+                        autoEnterEnabled = (boolean) args.get("autoEnterEnabled");
+                    }
+                    Rect sourceRectHint = null;
+                    if (args.get("sourceRectHintLeft") != null &&
+                            args.get("sourceRectHintTop") != null &&
+                            args.get("sourceRectHintRight") != null &&
+                            args.get("sourceRectHintBottom") != null) {
+                        sourceRectHint =
+                                new Rect((int) args.get("sourceRectHintLeft"),
+                                        (int) args.get("sourceRectHintTop"),
+                                        (int) args.get("sourceRectHintRight"),
+                                        (int) args.get("sourceRectHintBottom"));
+                    }
+                    Boolean seamlessResizeEnabled = null;
+                    if (args.get("seamlessResizeEnabled") != null) {
+                        seamlessResizeEnabled =
+                                (boolean) args.get("seamlessResizeEnabled");
+                    }
+                    Boolean useExternalStateMonitor = null;
+                    if (args.get("useExternalStateMonitor") != null) {
+                        useExternalStateMonitor =
+                                (boolean) args.get("useExternalStateMonitor");
+                    }
+                    Integer externalStateMonitorInterval = null;
+                    if (args.get("externalStateMonitorInterval") != null) {
+                        externalStateMonitorInterval =
+                                (int) args.get("externalStateMonitorInterval");
+                    }
+
+                    result.success(pipController.setup(
+                            aspectRatio, autoEnterEnabled, sourceRectHint,
+                            seamlessResizeEnabled, useExternalStateMonitor,
+                            externalStateMonitorInterval));
+                    break;
+                case "pipStart":
+                    result.success(pipController.start());
+                    break;
+                case "pipStop":
+                    pipController.stop();
+                    result.success(null);
+                    break;
+                case "pipDispose":
+                    pipController.dispose();
+                    result.success(null);
+                    break;
+                default:
+                    result.notImplemented();
+            }
+        } catch (Exception e) {
+            result.error(e.getClass().getSimpleName(), e.getMessage(),
+                    e.getCause());
+        }
+    }
+
+    @Override
+    public void onAttachedToActivity(@NonNull ActivityPluginBinding binding) {
+        initPipController(binding);
+    }
+
+    @Override
+    public void onDetachedFromActivityForConfigChanges() {
+        // do nothing
+    }
+
+    @Override
+    public void onReattachedToActivityForConfigChanges(
+            @NonNull ActivityPluginBinding binding) {
+        initPipController(binding);
+    }
+
+    @Override
+    public void onDetachedFromActivity() {
+        // do nothing
     }
 }

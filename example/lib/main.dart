@@ -84,21 +84,13 @@ class _SplashScreenState extends State<SplashScreen>
       vsync: this,
     );
 
-    _logoAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _logoController,
-      curve: Curves.elasticOut,
-    ));
+    _logoAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _logoController, curve: Curves.elasticOut),
+    );
 
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _fadeController,
-      curve: Curves.easeInOut,
-    ));
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _fadeController, curve: Curves.easeInOut),
+    );
 
     _logoController.forward();
     Timer(const Duration(milliseconds: 500), () {
@@ -136,11 +128,7 @@ class _SplashScreenState extends State<SplashScreen>
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF0A0A0A),
-              Color(0xFF1A1A1A),
-              Color(0xFF0A0A0A),
-            ],
+            colors: [Color(0xFF0A0A0A), Color(0xFF1A1A1A), Color(0xFF0A0A0A)],
           ),
         ),
         child: Center(
@@ -293,199 +281,210 @@ class _MyHomePageState extends State<MyHomePage> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF0A0A0A),
-              Color(0xFF1A1A1A),
-              Color(0xFF0A0A0A),
-            ],
+            colors: [Color(0xFF0A0A0A), Color(0xFF1A1A1A), Color(0xFF0A0A0A)],
           ),
         ),
         child: SafeArea(
-          child: !_permissionsGranted
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFF8B5CF6), Color(0xFFA855F7)],
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF8B5CF6).withOpacity(0.3),
-                              blurRadius: 20,
-                              spreadRadius: 2,
-                            ),
-                          ],
-                        ),
-                        child: const Icon(
-                          Icons.settings,
-                          size: 40,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      const CircularProgressIndicator(
-                        valueColor:
-                            AlwaysStoppedAnimation<Color>(Color(0xFF8B5CF6)),
-                        strokeWidth: 3,
-                      ),
-                      const SizedBox(height: 20),
-                      const Text(
-                        'Setting up permissions...',
-                        style: TextStyle(
-                          fontSize: 18,
-                          color: Colors.white,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Please allow camera and microphone access',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.white.withOpacity(0.7),
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              : SingleChildScrollView(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24.0),
+          child:
+              !_permissionsGranted
+                  ? Center(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.center,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const SizedBox(height: 40),
-                        // Header
-                        Column(
-                          children: [
-                            Container(
-                              width: 80,
-                              height: 80,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: const LinearGradient(
-                                  colors: [
-                                    Color(0xFF8B5CF6),
-                                    Color(0xFFA855F7),
-                                    Color(0xFF7C3AED),
-                                  ],
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: const Color(0xFF8B5CF6)
-                                        .withOpacity(0.3),
-                                    blurRadius: 20,
-                                    spreadRadius: 2,
-                                  ),
-                                ],
-                              ),
-                              child: const Icon(
-                                Icons.auto_awesome,
-                                size: 40,
-                                color: Colors.white,
-                              ),
+                        Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF8B5CF6), Color(0xFFA855F7)],
                             ),
-                            const SizedBox(height: 24),
-                            const Text(
-                              'Beauty Stream',
-                              style: TextStyle(
-                                fontSize: 32,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                                letterSpacing: -0.5,
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFF8B5CF6).withOpacity(0.3),
+                                blurRadius: 20,
+                                spreadRadius: 2,
                               ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Create stunning content with AI-powered filters',
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: Colors.white.withOpacity(0.7),
-                                fontWeight: FontWeight.w400,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 60),
-                        // Action Buttons
-                        _buildModernButton(
-                          context,
-                          icon: Icons.face_retouching_natural,
-                          title: 'Beauty Camera',
-                          subtitle: 'Photo & Video with stunning filters',
-                          gradient: const [
-                            Color(0xFF8B5CF6),
-                            Color(0xFFA855F7)
-                          ],
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const NosmaiCameraScreen(),
-                            ),
+                            ],
                           ),
+                          child: const Icon(
+                            Icons.settings,
+                            size: 40,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        const CircularProgressIndicator(
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Color(0xFF8B5CF6),
+                          ),
+                          strokeWidth: 3,
                         ),
                         const SizedBox(height: 20),
-                        _buildModernButton(
-                          context,
-                          icon: Icons.video_call,
-                          title: 'Live Streaming',
-                          subtitle: 'Stream with real-time beauty effects',
-                          gradient: const [
-                            Color(0xFF7C3AED),
-                            Color(0xFF8B5CF6)
-                          ],
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const StreamingScreen(),
-                            ),
+                        const Text(
+                          'Setting up permissions...',
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
-                        const SizedBox(height: 40),
-                        // Features
-                        Container(
-                          padding: const EdgeInsets.all(24),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.05),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.1),
-                              width: 1,
-                            ),
-                          ),
-                          child: Column(
-                            children: [
-                              Text(
-                                'Features',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.white.withOpacity(0.9),
-                                ),
-                              ),
-                              const SizedBox(height: 20),
-                              _buildFeatureRow(
-                                  Icons.face_4, 'Real-time Face Detection'),
-                              _buildFeatureRow(
-                                  Icons.auto_awesome, 'Beauty Filters'),
-                              _buildFeatureRow(
-                                  Icons.cloud_download, 'Cloud Filter Library'),
-                              _buildFeatureRow(
-                                  Icons.hd, 'HD Quality Processing'),
-                            ],
+                        const SizedBox(height: 8),
+                        Text(
+                          'Please allow camera and microphone access',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.white.withOpacity(0.7),
                           ),
                         ),
                       ],
                     ),
+                  )
+                  : SingleChildScrollView(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          const SizedBox(height: 40),
+                          // Header
+                          Column(
+                            children: [
+                              Container(
+                                width: 80,
+                                height: 80,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: const LinearGradient(
+                                    colors: [
+                                      Color(0xFF8B5CF6),
+                                      Color(0xFFA855F7),
+                                      Color(0xFF7C3AED),
+                                    ],
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(
+                                        0xFF8B5CF6,
+                                      ).withOpacity(0.3),
+                                      blurRadius: 20,
+                                      spreadRadius: 2,
+                                    ),
+                                  ],
+                                ),
+                                child: const Icon(
+                                  Icons.auto_awesome,
+                                  size: 40,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(height: 24),
+                              const Text(
+                                'Beauty Stream',
+                                style: TextStyle(
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                  letterSpacing: -0.5,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Create stunning content with AI-powered filters',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: Colors.white.withOpacity(0.7),
+                                  fontWeight: FontWeight.w400,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 60),
+                          // Action Buttons
+                          _buildModernButton(
+                            context,
+                            icon: Icons.face_retouching_natural,
+                            title: 'Beauty Camera',
+                            subtitle: 'Photo & Video with stunning filters',
+                            gradient: const [
+                              Color(0xFF8B5CF6),
+                              Color(0xFFA855F7),
+                            ],
+                            onTap:
+                                () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder:
+                                        (context) => const NosmaiCameraScreen(),
+                                  ),
+                                ),
+                          ),
+                          const SizedBox(height: 20),
+                          _buildModernButton(
+                            context,
+                            icon: Icons.video_call,
+                            title: 'Live Streaming',
+                            subtitle: 'Stream with real-time beauty effects',
+                            gradient: const [
+                              Color(0xFF7C3AED),
+                              Color(0xFF8B5CF6),
+                            ],
+                            onTap:
+                                () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder:
+                                        (context) => const StreamingScreen(),
+                                  ),
+                                ),
+                          ),
+                          const SizedBox(height: 40),
+                          // Features
+                          Container(
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.05),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.1),
+                                width: 1,
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                Text(
+                                  'Features',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white.withOpacity(0.9),
+                                  ),
+                                ),
+                                const SizedBox(height: 20),
+                                _buildFeatureRow(
+                                  Icons.face_4,
+                                  'Real-time Face Detection',
+                                ),
+                                _buildFeatureRow(
+                                  Icons.auto_awesome,
+                                  'Beauty Filters',
+                                ),
+                                _buildFeatureRow(
+                                  Icons.cloud_download,
+                                  'Cloud Filter Library',
+                                ),
+                                _buildFeatureRow(
+                                  Icons.hd,
+                                  'HD Quality Processing',
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
         ),
       ),
     );
@@ -496,11 +495,7 @@ class _MyHomePageState extends State<MyHomePage> {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          Icon(
-            icon,
-            size: 20,
-            color: const Color(0xFF8B5CF6),
-          ),
+          Icon(icon, size: 20, color: const Color(0xFF8B5CF6)),
           const SizedBox(width: 12),
           Text(
             text,
@@ -562,11 +557,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     color: Colors.white.withOpacity(0.2),
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  child: Icon(
-                    icon,
-                    size: 28,
-                    color: Colors.white,
-                  ),
+                  child: Icon(icon, size: 28, color: Colors.white),
                 ),
                 const SizedBox(width: 20),
                 Expanded(

@@ -57,8 +57,12 @@ class Nosmai {
   }
 
   static Future<bool> startStreaming(
-      String appId, String token, String channelId, int userId,
-      {bool startCameraImmediately = true}) async {
+    String appId,
+    String token,
+    String channelId,
+    int userId, {
+    bool startCameraImmediately = true,
+  }) async {
     try {
       final bool result = await platform.invokeMethod('startCustomCamera', {
         'appId': appId,
@@ -144,7 +148,10 @@ class Nosmai {
   }
 
   static Future<bool> joinChannel(
-      String token, String channelId, int userId) async {
+    String token,
+    String channelId,
+    int userId,
+  ) async {
     try {
       final bool result = await platform.invokeMethod('joinChannel', {
         'token': token,
@@ -322,8 +329,9 @@ class Nosmai {
 
   static Future<bool> applyFilter(String path) async {
     try {
-      final ok =
-          await platform.invokeMethod<bool>('applyFilter', {'path': path});
+      final ok = await platform.invokeMethod<bool>('applyFilter', {
+        'path': path,
+      });
       return ok == true;
     } catch (e) {
       print('Error applying filter: $e');
@@ -371,7 +379,8 @@ class Nosmai {
   }
 
   static Future<Map<String, dynamic>> downloadCloudFilter(
-      String filterId) async {
+    String filterId,
+  ) async {
     try {
       final result = await platform.invokeMethod<Map>('downloadCloudFilter', {
         'filterId': filterId,
@@ -379,10 +388,7 @@ class Nosmai {
       return Map<String, dynamic>.from(result ?? {});
     } catch (e) {
       print('Error downloading cloud filter: $e');
-      return {
-        'success': false,
-        'error': e.toString(),
-      };
+      return {'success': false, 'error': e.toString()};
     }
   }
 
@@ -500,9 +506,7 @@ class Nosmai {
   // Hue filter
   static Future<bool> applyHue(double hue) async {
     try {
-      final bool result = await platform.invokeMethod('applyHue', {
-        'hue': hue,
-      });
+      final bool result = await platform.invokeMethod('applyHue', {'hue': hue});
       return result;
     } catch (e) {
       print('Error applying hue: $e');
@@ -556,10 +560,14 @@ class Nosmai {
   // Get current filter states
   static Future<Map<String, double>> getCurrentFilterStates() async {
     try {
-      final Map<dynamic, dynamic> result =
-          await platform.invokeMethod('getCurrentFilterStates');
-      return Map<String, double>.from(result.map(
-          (key, value) => MapEntry(key.toString(), (value as num).toDouble())));
+      final Map<dynamic, dynamic> result = await platform.invokeMethod(
+        'getCurrentFilterStates',
+      );
+      return Map<String, double>.from(
+        result.map(
+          (key, value) => MapEntry(key.toString(), (value as num).toDouble()),
+        ),
+      );
     } catch (e) {
       print('Error getting current filter states: $e');
       return {};
@@ -611,7 +619,9 @@ class Nosmai {
 
   // Apply makeup blend level
   static Future<bool> applyMakeupBlendLevel(
-      String filterName, double level) async {
+    String filterName,
+    double level,
+  ) async {
     try {
       final bool result = await platform.invokeMethod('applyMakeupBlendLevel', {
         'filterName': filterName,
@@ -668,7 +678,9 @@ class Nosmai {
 
   // White balance filter
   static Future<bool> applyWhiteBalance(
-      double temperatureK, double tint) async {
+    double temperatureK,
+    double tint,
+  ) async {
     try {
       final tempClamped = temperatureK.clamp(1000.0, 12000.0);
       final tintClamped = tint.clamp(-200.0, 200.0);
@@ -713,8 +725,9 @@ class Nosmai {
 
   static Future<NosmaiRecordingResult> stopRecording() async {
     try {
-      final Map<dynamic, dynamic> result =
-          await platform.invokeMethod('stopRecording');
+      final Map<dynamic, dynamic> result = await platform.invokeMethod(
+        'stopRecording',
+      );
       return NosmaiRecordingResult.fromMap(Map<String, dynamic>.from(result));
     } catch (e) {
       print('Error stopping recording: $e');
@@ -729,8 +742,9 @@ class Nosmai {
   // Typed Photo Capture
   static Future<NosmaiPhotoResult> capturePhoto() async {
     try {
-      final Map<dynamic, dynamic> result =
-          await platform.invokeMethod('capturePhoto');
+      final Map<dynamic, dynamic> result = await platform.invokeMethod(
+        'capturePhoto',
+      );
       return NosmaiPhotoResult.fromMap(Map<String, dynamic>.from(result));
     } catch (e) {
       print('Error capturing photo: $e');
@@ -768,14 +782,17 @@ class Nosmai {
   }
 
   // Typed Gallery Save Methods
-  static Future<NosmaiGalleryResult> saveImageToGallery(List<int> imageData,
-      {String? name}) async {
+  static Future<NosmaiGalleryResult> saveImageToGallery(
+    List<int> imageData, {
+    String? name,
+  }) async {
     try {
-      final Map<dynamic, dynamic> result =
-          await platform.invokeMethod('saveImageToGallery', {
-        'imageData': imageData,
-        'name': name ?? 'nosmai_photo_${DateTime.now().millisecondsSinceEpoch}',
-      });
+      final Map<dynamic, dynamic> result = await platform
+          .invokeMethod('saveImageToGallery', {
+            'imageData': imageData,
+            'name':
+                name ?? 'nosmai_photo_${DateTime.now().millisecondsSinceEpoch}',
+          });
       return NosmaiGalleryResult.fromMap(Map<String, dynamic>.from(result));
     } catch (e) {
       print('Error saving image to gallery: $e');
@@ -787,14 +804,17 @@ class Nosmai {
     }
   }
 
-  static Future<NosmaiGalleryResult> saveVideoToGallery(String videoPath,
-      {String? name}) async {
+  static Future<NosmaiGalleryResult> saveVideoToGallery(
+    String videoPath, {
+    String? name,
+  }) async {
     try {
-      final Map<dynamic, dynamic> result =
-          await platform.invokeMethod('saveVideoToGallery', {
-        'videoPath': videoPath,
-        'name': name ?? 'nosmai_video_${DateTime.now().millisecondsSinceEpoch}',
-      });
+      final Map<dynamic, dynamic> result = await platform
+          .invokeMethod('saveVideoToGallery', {
+            'videoPath': videoPath,
+            'name':
+                name ?? 'nosmai_video_${DateTime.now().millisecondsSinceEpoch}',
+          });
       return NosmaiGalleryResult.fromMap(Map<String, dynamic>.from(result));
     } catch (e) {
       print('Error saving video to gallery: $e');
@@ -807,10 +827,11 @@ class Nosmai {
   }
 
   // HSB Adjustment Methods
-  static Future<bool> adjustHSB(
-      {required double hue,
-      required double saturation,
-      required double brightness}) async {
+  static Future<bool> adjustHSB({
+    required double hue,
+    required double saturation,
+    required double brightness,
+  }) async {
     try {
       final bool result = await platform.invokeMethod('adjustHSB', {
         'hue': hue,

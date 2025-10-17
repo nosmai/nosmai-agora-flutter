@@ -6,37 +6,25 @@ def safeExtGet(prop, fallback) {
 }
 
 buildscript {
-    ext.kotlin_version = '1.8.10'
     repositories {
         google()
         mavenCentral()
     }
-    dependencies {
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-    }
+
 }
 
 rootProject.allprojects {
     repositories {
         google()
         mavenCentral()
+        // Nosmai SDK local repository
         flatDir {
-            dirs "${project.projectDir}/libs", "${rootProject.projectDir}/app/libs"
+            dirs project(':agora_rtc_engine').file('libs')
         }
     }
 }
 
 apply plugin: 'com.android.library'
-apply plugin: 'kotlin-android'
-
-// Task to copy nosmai AAR to consuming app
-task copyNosmaiAar(type: Copy) {
-    from 'libs/nosmai-release.aar'
-    into "${rootProject.projectDir}/app/libs/"
-    doFirst {
-        file("${rootProject.projectDir}/app/libs/").mkdirs()
-    }
-}
 
 android {
     // Conditional for compatibility with AGP <4.2.
@@ -56,10 +44,6 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_1_8.toString()
-    }
-
     sourceSets {
         if (isDev(project)) {
            main.jniLibs.srcDirs += 'libs'
@@ -73,15 +57,7 @@ android {
     }
 }
 
-// Ensure the AAR is copied before compilation
-afterEvaluate {
-    preBuild.dependsOn copyNosmaiAar
-}
-
 dependencies {
-  // nosmai dependency - automatically copied to consuming app
-  api(name: 'nosmai-release', ext: 'aar')
-  
   if (isDev(project)) {
     api fileTree(dir: "libs", include: ["*.jar"])
   } else {
@@ -94,9 +70,9 @@ dependencies {
     api 'io.agora.rtc:full-screen-sharing:4.5.2.143'
     // native dependencies end
   }
-  
-  // Required for Kotlin support
-  implementation "org.jetbrains.kotlin:kotlin-stdlib:1.8.10"
+
+  // Nosmai SDK dependency (using flatDir repository)
+  api (name: 'nosmai-release', ext: 'aar')
 }
 
 static boolean isDev(Project project) {
