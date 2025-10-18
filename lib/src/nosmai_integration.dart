@@ -787,12 +787,11 @@ class Nosmai {
     String? name,
   }) async {
     try {
-      final Map<dynamic, dynamic> result = await platform
-          .invokeMethod('saveImageToGallery', {
-            'imageData': imageData,
-            'name':
-                name ?? 'nosmai_photo_${DateTime.now().millisecondsSinceEpoch}',
-          });
+      final Map<dynamic, dynamic> result =
+          await platform.invokeMethod('saveImageToGallery', {
+        'imageData': imageData,
+        'name': name ?? 'nosmai_photo_${DateTime.now().millisecondsSinceEpoch}',
+      });
       return NosmaiGalleryResult.fromMap(Map<String, dynamic>.from(result));
     } catch (e) {
       print('Error saving image to gallery: $e');
@@ -809,12 +808,11 @@ class Nosmai {
     String? name,
   }) async {
     try {
-      final Map<dynamic, dynamic> result = await platform
-          .invokeMethod('saveVideoToGallery', {
-            'videoPath': videoPath,
-            'name':
-                name ?? 'nosmai_video_${DateTime.now().millisecondsSinceEpoch}',
-          });
+      final Map<dynamic, dynamic> result =
+          await platform.invokeMethod('saveVideoToGallery', {
+        'videoPath': videoPath,
+        'name': name ?? 'nosmai_video_${DateTime.now().millisecondsSinceEpoch}',
+      });
       return NosmaiGalleryResult.fromMap(Map<String, dynamic>.from(result));
     } catch (e) {
       print('Error saving video to gallery: $e');

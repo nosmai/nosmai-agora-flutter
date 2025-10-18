@@ -195,6 +195,19 @@ public class NosmaiAgoraBridge {
     public boolean releaseAgora() {
         try {
             if (agoraEngine != null) {
+                // 🎯 CRITICAL FIX: Wait for async operations to complete
+                // leaveChannel() is async and continues in background
+                // Frame callbacks need time to finish
+                // This prevents SIGSEGV crash when trying to access freed engine
+                try {
+                    Log.i(TAG, "Waiting for async operations to complete...");
+                    Thread.sleep(800);  // Wait 800ms for leaveChannel + frame callbacks
+                    Log.i(TAG, "Wait complete, destroying engine");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    Log.w(TAG, "Sleep interrupted during cleanup");
+                }
+
                 RtcEngine.destroy();
                 agoraEngine = null;
                 agoraInitialized = false;
@@ -444,6 +457,22 @@ public class NosmaiAgoraBridge {
         try {
             Log.i(TAG, "Stopping custom camera");
 
+            // 🎯 CRITICAL: Stop all Agora streams FIRST before cleanup
+            if (agoraEngine != null) {
+                try {
+                    // Disable external video source (stops frame pushing)
+                    agoraEngine.setExternalVideoSource(false, false, Constants.ExternalVideoSourceType.VIDEO_FRAME);
+                    Log.i(TAG, "External video source disabled");
+
+                    // Disable video/audio
+                    agoraEngine.enableLocalVideo(false);
+                    agoraEngine.disableVideo();  // disableVideo() has no parameters
+                    Log.i(TAG, "Video disabled");
+                } catch (Exception e) {
+                    Log.w(TAG, "Error disabling Agora streams: " + e.getMessage());
+                }
+            }
+
             // Clear frame callback
             NosmaiSDK.setFrameCallback(null);
 
@@ -457,9 +486,10 @@ public class NosmaiAgoraBridge {
             // Stop Nosmai processing
             NosmaiSDK.stopProcessing();
 
-            // Leave channel
-            if (channelJoined) {
+            // Leave channel (this is async!)
+            if (channelJoined && agoraEngine != null) {
                 agoraEngine.leaveChannel();
+                Log.i(TAG, "Left channel (async)");
             }
 
             isCustomCameraActive = false;
@@ -587,6 +617,57 @@ public class NosmaiAgoraBridge {
         if (agoraEngine == null) return false;
         try {
             agoraEngine.enableLocalVideo(enabled);
+
+            // 🎯 FIX: Restart Nosmai processing (not camera) when re-enabling
+            if (enabled) {
+                Log.i(TAG, "Re-enabling camera - restarting Nosmai processing");
+
+                if (previewView != null) {
+                    try {
+                        // Stop and restart Nosmai processing to refresh GPU pipeline
+                        NosmaiSDK.stopProcessing();
+
+                        // Small delay for cleanup
+                        try {
+                            Thread.sleep(50);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+
+                        // Restart processing with existing preview view
+                        NosmaiSDK.startProcessing(previewView);
+                        NosmaiSDK.setRenderMode(NosmaiSDK.RenderMode.DUAL_OUTPUT);
+
+                        // Re-setup frame callback for streaming
+                        setupFrameCallbackForStreaming();
+
+                        // Re-apply camera orientation
+                        if (camera2Helper != null) {
+                            previewView.setCameraOrientation(
+                                camera2Helper.isFrontCamera(),
+                                camera2Helper.getSensorOrientation()
+                            );
+                            NosmaiSDK.setMirrorX(camera2Helper.isFrontCamera());
+                            NosmaiSDK.setCameraFacing(camera2Helper.isFrontCamera());
+                        }
+
+                        Log.i(TAG, "✅ Nosmai processing restarted successfully");
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to restart processing, attempting full re-init", e);
+
+                        // Fallback: Re-initialize from stored license
+                        if (storedLicenseKey != null) {
+                            NosmaiSDK.initialize(context, storedLicenseKey);
+                            NosmaiSDK.startProcessing(previewView);
+                            NosmaiSDK.setRenderMode(NosmaiSDK.RenderMode.DUAL_OUTPUT);
+                            setupFrameCallbackForStreaming();
+                        }
+                    }
+                }
+            } else {
+                Log.i(TAG, "Camera disabled (keeping camera capture active)");
+            }
+
             return true;
         } catch (Exception e) {
             Log.e(TAG, "Error enabling local video", e);
