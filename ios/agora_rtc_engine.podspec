@@ -20,7 +20,7 @@ Pod::Spec.new do |s|
   s.dependency 'Flutter'
   
   # Add Nosmai SDK dependency
-  s.dependency 'NosmaiCameraSDK', '~> 1.0.8'
+  s.dependency 'NosmaiCameraSDK', '~> 2.0.2'
 
   plugin_dev_path = File.join(File.dirname(File.realpath(__FILE__)), '.plugin_dev')
   if File.exist?(plugin_dev_path)

@@ -158,17 +158,14 @@ public class Camera2Helper {
             mSensorOrientation = mCameraCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
             Log.i(TAG, "📐 Sensor orientation: " + mSensorOrientation);
 
-            // Choose 1280x720 (landscape) for optimal performance
             mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class), 1280, 720);
             Log.i(TAG, "📏 Preview size: " + mPreviewSize.getWidth() + "x" + mPreviewSize.getHeight());
 
-            // Create ImageReader with 3 buffers for smooth pipeline
             mImageReader = ImageReader.newInstance(
                     mPreviewSize.getWidth(), mPreviewSize.getHeight(),
                     ImageFormat.YUV_420_888, 3);
             mImageReader.setOnImageAvailableListener(mOnImageAvailableListener, mBackgroundHandler);
 
-            // Open camera
             if (!mCameraOpenCloseLock.tryAcquire(2500, TimeUnit.MILLISECONDS)) {
                 throw new RuntimeException("Time out waiting to lock camera opening.");
             }
@@ -193,7 +190,6 @@ public class Camera2Helper {
                     return cameraId;
                 }
             }
-            // If requested camera not found, try any available camera
             if (manager.getCameraIdList().length > 0) {
                 String fallbackId = manager.getCameraIdList()[0];
                 Log.w(TAG, "⚠️ Requested camera not found, using fallback: " + fallbackId);
@@ -208,24 +204,20 @@ public class Camera2Helper {
     private Size chooseOptimalSize(Size[] choices, int width, int height) {
         List<Size> bigEnough = Arrays.asList(choices);
 
-        // Sort by area
         Collections.sort(bigEnough, new Comparator<Size>() {
             @Override
             public int compare(Size lhs, Size rhs) {
-                // Sort in descending order
                 return Long.signum((long) rhs.getWidth() * rhs.getHeight()
                         - (long) lhs.getWidth() * lhs.getHeight());
             }
         });
 
-        // Choose one that doesn't exceed target resolution and is large enough
         for (Size option : bigEnough) {
             if (option.getWidth() <= width && option.getHeight() <= height) {
                 return option;
             }
         }
 
-        // If no suitable size found, choose the smallest one
         return bigEnough.get(bigEnough.size() - 1);
     }
 

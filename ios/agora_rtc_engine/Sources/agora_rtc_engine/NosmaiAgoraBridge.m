@@ -68,6 +68,9 @@
 // Mirror state for frame processing
 @property (nonatomic, assign) BOOL mirrorModeEnabled;
 
+// Thread-safe cleanup flag (atomic to prevent race conditions)
+@property (atomic, assign) BOOL isCleaningUp;
+
 @end
 
 @implementation NosmaiAgoraBridge
@@ -89,6 +92,7 @@
         [self resetFilterStates];
         _videoDataOutputQueue = dispatch_queue_create("com.agora.nosmai.videoQueue", DISPATCH_QUEUE_SERIAL);
         _mirrorModeEnabled = NO;
+        _isCleaningUp = NO;
     }
     return self;
 }
@@ -269,32 +273,26 @@
         // For multi-host scenario: if same channel but different user, need to restart camera
         if (self.isCustomCameraActive && [self.currentChannelId isEqualToString:channelId]) {
             if (self.currentUserId != userId && userId != 0) {
-                NSLog(@"NosmaiAgora: Same channel but different user (multi-host) - restarting camera for user: %lu", (unsigned long)userId);
                 [self stopCamera];
-                [NSThread sleepForTimeInterval:0.2]; // Small delay to ensure camera is released
+                [NSThread sleepForTimeInterval:0.2];
             } else {
-                NSLog(@"NosmaiAgora: Already active for same channel and user");
                 return YES;
             }
         }
         
         // If active with different channel, cleanup first
         if (self.isCustomCameraActive && ![self.currentChannelId isEqualToString:channelId]) {
-            NSLog(@"NosmaiAgora: Switching channels - cleaning up first");
             [self teardownStreaming];
             [NSThread sleepForTimeInterval:0.1]; // Small delay
         }
         
         // Ensure singleton is initialized
         if (!self.agoraInitialized || !self.agoraEngine) {
-            NSLog(@"NosmaiAgora: Initializing Agora engine");
             if (![self initAgoraWithAppId:appId]) {
-                NSLog(@"NosmaiAgora: Failed to initialize Agora");
                 return NO;
             }
         }
         
-        NSLog(@"NosmaiAgora: Configuring video settings");
         
         // Configure video and audio
         [self.agoraEngine enableVideo];
@@ -303,11 +301,9 @@
         [self.agoraEngine muteAllRemoteAudioStreams:YES];
         [self.agoraEngine enableAudio];
         [self.agoraEngine muteAllRemoteAudioStreams:YES];
-        NSLog(@"NosmaiAgora: Enabled audio publishing, muted remote audio playback");
         
         // Set up external video source
         [self.agoraEngine setExternalVideoSource:YES useTexture:NO sourceType:AgoraExternalVideoSourceTypeVideoFrame];
-        NSLog(@"NosmaiAgora: External video source setup completed");
         
         // Configure video encoder (720p portrait with fixed orientation)
         AgoraVideoEncoderConfiguration *videoConfig = [[AgoraVideoEncoderConfiguration alloc] 
@@ -317,17 +313,10 @@
                                                         orientationMode:AgoraVideoOutputOrientationModeFixedPortrait
                                                         mirrorMode:AgoraVideoMirrorModeDisabled];
         [self.agoraEngine setVideoEncoderConfiguration:videoConfig];
-        NSLog(@"NosmaiAgora: Video encoder configuration completed - Fixed Portrait Mode");
-        
-        // Join channel
-        NSLog(@"NosmaiAgora: JOINING: channel=%@, nativeUserId=%lu, token=%@...", 
-              channelId, (unsigned long)userId, [token substringToIndex:MIN(20, token.length)]);
         
         int joinResult = [self.agoraEngine joinChannelByToken:token channelId:channelId info:nil uid:userId joinSuccess:nil];
-        NSLog(@"NosmaiAgora: Join channel result: %d", joinResult);
         
         if (joinResult != 0) {
-            NSLog(@"NosmaiAgora: JOIN_FAILED: Error code %d", joinResult);
             return NO;
         }
         
@@ -339,11 +328,18 @@
         // Initialize camera if needed
         if (startCameraImmediately) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                if (self.isCleaningUp) {
+                    return;
+                }
+
                 if (self.isCustomCameraActive) {
                     [self setupCamera];
                     // Allow pushing frames after camera setup
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                        self.allowPush = YES;
+                        // 🛡️ Double-check cleanup flag before enabling push
+                        if (!self.isCleaningUp && self.isCustomCameraActive) {
+                            self.allowPush = YES;
+                        }
                     });
                 }
             });
@@ -391,41 +387,45 @@
 }
 
 - (void)teardownStreaming {
-    
-    // First stop frame pushing
+    self.isCleaningUp = YES;
     self.allowPush = NO;
     self.channelJoined = NO;
-    
-    // Stop camera
-    [self stopCamera];
-    [NSThread sleepForTimeInterval:0.2];
-    
-    // Clear frame processing
+    self.localPreviewView = nil;
+    [self stopCamera]; 
+    [NSThread sleepForTimeInterval:0.8];
 #if HAS_NOSMAI_FRAMEWORK
     if (self.nosmaiSDK) {
+        NSLog(@"🧹 [NosmaiAgora] Clearing Nosmai callback (final check)");
         [self.nosmaiSDK setCVPixelBufferCallback:nil];
     }
 #endif
-    
-    // Disable external video source
+
+    // 🎯 STEP 7: Disable external video source
     if (self.agoraEngine) {
         [self.agoraEngine setExternalVideoSource:NO useTexture:NO sourceType:AgoraExternalVideoSourceTypeVideoFrame];
     }
-    
-    // Leave channel and destroy engine
+
+    // 🎯 STEP 8: Leave channel (async operation)
     if (self.agoraEngine) {
         [self.agoraEngine leaveChannel:nil];
-        [NSThread sleepForTimeInterval:0.2];
+        [NSThread sleepForTimeInterval:0.5];
+    }
+
+    // 🎯 STEP 9: Destroy Agora engine
+    if (self.agoraEngine) {
         [AgoraRtcEngineKit destroy];
         self.agoraEngine = nil;
         self.agoraInitialized = NO;
     }
-    
-    // Clear state variables
+
+    // 🎯 STEP 10: Clear state variables
     self.currentChannelId = nil;
     self.currentUserId = 0;
     self.isCustomCameraActive = NO;
-    
+
+    // 🎯 STEP 11: Reset cleanup flag (allow future sessions)
+    self.isCleaningUp = NO;
+
 }
 
 #pragma mark - Camera Management
@@ -452,11 +452,16 @@
             if (!strongSelf) {
                 return;
             }
-            
+
+            // 🛡️ CRITICAL: Check cleanup flag FIRST in callback
+            if (strongSelf.isCleaningUp) {
+                return; // Abort immediately if cleanup is in progress
+            }
+
             if (strongSelf.localPreviewView && pixelBuffer) {
                 [strongSelf displayFrameInPreview:pixelBuffer];
             }
-            
+
             if (strongSelf.allowPush && strongSelf.channelJoined) {
                 [strongSelf pushFrameToAgora:pixelBuffer];
             }
@@ -470,33 +475,51 @@
 }
 
 - (void)stopCamera {
+
+    // 🎯 STEP 1: Clear callback FIRST (before stopping processing)
+    // This prevents new frames from being queued
+#if HAS_NOSMAI_FRAMEWORK
+    if (self.nosmaiSDK) {
+        [self.nosmaiSDK setCVPixelBufferCallback:nil];
+        [self.nosmaiSDK setLiveFrameOutputEnabled:NO];
+    }
+#endif
+
+    // 🎯 STEP 2: Stop capture session (stops new frame generation)
     if (self.captureSession && self.captureSession.isRunning) {
         [self.captureSession stopRunning];
     }
+
+    // 🎯 STEP 3: Wait for in-flight frames to complete (CRITICAL)
+    // This ensures all frames in the callback queue are processed
+    [NSThread sleepForTimeInterval:0.3];
+
+#if HAS_NOSMAI_FRAMEWORK
+    // 🎯 STEP 4: Stop Nosmai processing
+    if (self.nosmaiSDK) {
+        [self.nosmaiSDK stopProcessing];
+    }
+#endif
+
+    // 🎯 STEP 5: Nullify resources
     self.captureSession = nil;
     self.captureDevice = nil;
     self.videoDataOutput = nil;
-    
-#if HAS_NOSMAI_FRAMEWORK
-    if (self.nosmaiSDK) {
-        [self.nosmaiSDK stopProcessing];
-        [self.nosmaiSDK setLiveFrameOutputEnabled:NO];
-        [self.nosmaiSDK setCVPixelBufferCallback:nil];
-    }
-#endif
+
 }
 
 - (void)pushFrameToAgora:(CVPixelBufferRef)pixelBuffer {
-    if (!self.agoraEngine || !self.allowPush) {
+    // 🛡️ Safety check: Don't push frames during cleanup
+    if (self.isCleaningUp || !self.agoraEngine || !self.allowPush) {
         return;
     }
-    
+
     AgoraVideoFrame *videoFrame = [[AgoraVideoFrame alloc] init];
     videoFrame.format = AgoraVideoFormatCVPixelI420;
     videoFrame.textureBuf = pixelBuffer;
-    videoFrame.rotation = 0; // No rotation
-    videoFrame.time = CMTimeMakeWithSeconds(CACurrentMediaTime(), 1000000000); // Convert to CMTime with nanosecond scale
-    
+    videoFrame.rotation = 0;
+    videoFrame.time = CMTimeMakeWithSeconds(CACurrentMediaTime(), 1000000000); 
+
     [self.agoraEngine pushExternalVideoFrame:videoFrame];
 }
 
@@ -969,12 +992,19 @@
 #pragma mark - AgoraRtcEngineDelegate
 
 - (void)rtcEngine:(AgoraRtcEngineKit *)engine didJoinChannel:(NSString *)channel withUid:(NSUInteger)uid elapsed:(NSInteger)elapsed {
-    
+
+    // 🛡️ CRITICAL: Don't set flags if cleanup is in progress
+    if (self.isCleaningUp) {
+        NSLog(@"⚠️ [NosmaiAgora] Ignoring didJoinChannel - cleanup in progress");
+        return;
+    }
+
     self.channelJoined = YES;
     self.currentChannelId = channel;
     self.currentUserId = uid;
     self.allowPush = YES;
-    
+    NSLog(@"✅ [NosmaiAgora] Joined channel: %@ with uid: %lu", channel, (unsigned long)uid);
+
 }
 
 - (void)rtcEngine:(AgoraRtcEngineKit *)engine didJoinedOfUid:(NSUInteger)uid elapsed:(NSInteger)elapsed {
@@ -1146,35 +1176,78 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 #pragma mark - Display Processed Frame
 
 - (void)displayFrameInPreview:(CVPixelBufferRef)pixelBuffer {
-    if (!_localPreviewView || !pixelBuffer) {
+    // 🛡️ CRITICAL SAFETY CHECKS - Prevent crash during cleanup
+
+    // Check 1: Verify we're not in cleanup phase (atomic check)
+    if (self.isCleaningUp) {
         return;
     }
-    
+
+    // Check 2: Validate pixelBuffer is not NULL
+    if (!pixelBuffer) {
+        return;
+    }
+
+    // Check 3: Verify preview view still exists (capture weak reference)
+    __weak UIView *weakPreviewView = _localPreviewView;
+    if (!weakPreviewView) {
+        return;
+    }
+
+    // Check 4: Retain pixelBuffer to prevent deallocation during async dispatch
+    CVPixelBufferRetain(pixelBuffer);
+
     // Convert CVPixelBuffer to UIImage and display
     dispatch_async(dispatch_get_main_queue(), ^{
         @try {
+            // Re-check cleanup flag on main queue
+            if (self.isCleaningUp) {
+                CVPixelBufferRelease(pixelBuffer);
+                return;
+            }
+
+            // Re-check preview view on main queue
+            UIView *strongPreviewView = weakPreviewView;
+            if (!strongPreviewView) {
+                CVPixelBufferRelease(pixelBuffer);
+                return;
+            }
+
+            // Safe to process now
             CIImage *ciImage = [CIImage imageWithCVPixelBuffer:pixelBuffer];
+            if (!ciImage) {
+                CVPixelBufferRelease(pixelBuffer);
+                return;
+            }
+
             CIContext *context = [CIContext contextWithOptions:nil];
             CGImageRef cgImage = [context createCGImage:ciImage fromRect:ciImage.extent];
-            
+
             if (cgImage) {
                 UIImage *image = [UIImage imageWithCGImage:cgImage];
                 CGImageRelease(cgImage);
-                
+
                 // Mirror applied at capture level, not display level
-                
+
                 // Create or update image view
-                UIImageView *imageView = (UIImageView *)[_localPreviewView viewWithTag:999];
+                UIImageView *imageView = (UIImageView *)[strongPreviewView viewWithTag:999];
                 if (!imageView) {
-                    imageView = [[UIImageView alloc] initWithFrame:_localPreviewView.bounds];
+                    imageView = [[UIImageView alloc] initWithFrame:strongPreviewView.bounds];
                     imageView.tag = 999;
                     imageView.contentMode = UIViewContentModeScaleAspectFill;
                     imageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-                    [_localPreviewView addSubview:imageView];
+                    [strongPreviewView addSubview:imageView];
                 }
                 imageView.image = image;
             }
+
+            // Release the retained pixelBuffer
+            CVPixelBufferRelease(pixelBuffer);
+
         } @catch (NSException *exception) {
+            // Ensure pixelBuffer is always released even on exception
+            CVPixelBufferRelease(pixelBuffer);
+            NSLog(@"⚠️ Exception in displayFrameInPreview: %@", exception);
         }
     });
 }
