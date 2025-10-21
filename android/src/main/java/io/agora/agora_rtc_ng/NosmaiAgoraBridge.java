@@ -67,6 +67,7 @@ public class NosmaiAgoraBridge {
     private boolean isCameraPreviewActive = false;
     private boolean channelJoined = false;
     private boolean mirrorModeEnabled = false;
+    private boolean allowPush = false; // Controls frame pushing to Agora
 
     // License key for re-initialization
     private String storedLicenseKey = null;
@@ -341,6 +342,7 @@ public class NosmaiAgoraBridge {
             }
 
             isCustomCameraActive = true;
+            allowPush = true; // Enable frame pushing to Agora
             Log.i(TAG, "Custom camera started successfully");
             return true;
 
@@ -435,7 +437,7 @@ public class NosmaiAgoraBridge {
      */
     private void setupFrameCallbackForStreaming() {
         NosmaiSDK.setFrameCallback(frame -> {
-            if (!isCustomCameraActive || agoraEngine == null || frame.pixelBuffer == null) {
+            if (!isCustomCameraActive || agoraEngine == null || frame.pixelBuffer == null || !allowPush) {
                 return;
             }
 
@@ -528,6 +530,7 @@ public class NosmaiAgoraBridge {
             }
 
             isCustomCameraActive = false;
+            allowPush = false; // Disable frame pushing
             Log.i(TAG, "Custom camera stopped");
             return true;
 
@@ -651,6 +654,11 @@ public class NosmaiAgoraBridge {
     public boolean enableLocalVideo(boolean enabled) {
         if (agoraEngine == null) return false;
         try {
+            // ✅ Control frame pushing via allowPush flag
+            allowPush = enabled;
+            Log.i(TAG, "📹 Local video " + (enabled ? "ENABLED" : "DISABLED"));
+
+            // Also call Agora's method (for compatibility)
             agoraEngine.enableLocalVideo(enabled);
 
             // 🎯 FIX: Restart Nosmai processing (not camera) when re-enabling

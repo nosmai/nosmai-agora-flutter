@@ -532,7 +532,13 @@
 
 - (BOOL)enableLocalVideo:(BOOL)enabled {
     if (!self.agoraEngine) return NO;
-    return [self.agoraEngine enableLocalVideo:enabled] == 0;
+
+    // ✅ For custom camera: Control frame pushing via allowPush flag
+    // (NOT Agora's enableLocalVideo, which is for standard camera)
+    self.allowPush = enabled;
+    NSLog(@"📹 [NosmaiAgora] Local video %@", enabled ? @"ENABLED" : @"DISABLED");
+
+    return YES;
 }
 
 - (BOOL)startStreaming {
