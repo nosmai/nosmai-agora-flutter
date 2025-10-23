@@ -18,9 +18,10 @@ Pod::Spec.new do |s|
   s.source_files = 'agora_rtc_engine/Sources/**/*.{h,mm,m,swift}'
   s.public_header_files = 'agora_rtc_engine/Sources/**/include/**/*.h'
   s.dependency 'Flutter'
-  
-  # Add Nosmai SDK dependency
-  s.dependency 'NosmaiCameraSDK', '~> 2.0.2'
+
+  # Add Nosmai SDK dependency - Using local framework with updated fix
+  s.vendored_frameworks = 'Framework/nosmai.framework'
+  # s.dependency 'NosmaiCameraSDK', '~> 2.0.2' # Commented out - using local framework instead
 
   plugin_dev_path = File.join(File.dirname(File.realpath(__FILE__)), '.plugin_dev')
   if File.exist?(plugin_dev_path)

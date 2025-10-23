@@ -374,9 +374,7 @@
 
 - (void)handleGetLocalFilters:(FlutterMethodCall*)call result:(FlutterResult)result {
     @try {
-        NSLog(@"[NosmaiAgoraPlugin] handleGetLocalFilters called");
         NSArray *filters = [self discoverLocalFilters];
-        NSLog(@"[NosmaiAgoraPlugin] RAW LOCAL FILTERS RETURNED: %@", filters);
         result(filters);
     } @catch (NSException *exception) {
         result([FlutterError errorWithCode:@"LOCAL_FILTERS_ERROR"
@@ -387,7 +385,6 @@
 
 - (void)handleGetCloudFilters:(FlutterMethodCall*)call result:(FlutterResult)result {
     @try {
-        NSLog(@"[NosmaiAgoraPlugin] handleGetCloudFilters called");
         NosmaiAgoraBridge *bridge = [NosmaiAgoraBridge sharedInstance];
         
         if (!bridge.nosmaiSDK) {
@@ -399,7 +396,6 @@
         
         // Get cloud filters from NosmaiSDK
         NSArray<NSDictionary *> *cloudFilters = [bridge.nosmaiSDK getCloudFilters];
-        NSLog(@"[NosmaiAgoraPlugin] RAW CLOUD FILTERS FROM NOSMAI SDK: %@", cloudFilters);
         
         if (!cloudFilters || cloudFilters.count == 0) {
             cloudFilters = @[];
@@ -474,17 +470,14 @@
 
 - (void)handleGetFilters:(FlutterMethodCall*)call result:(FlutterResult)result {
     @try {
-        NSLog(@"[NosmaiAgoraPlugin] handleGetFilters called");
         NSMutableArray *allFilters = [NSMutableArray array];
         
         NSArray *localFilters = [self discoverLocalFilters];
-        NSLog(@"[NosmaiAgoraPlugin] RAW LOCAL FILTERS IN getFilters: %@", localFilters);
         [allFilters addObjectsFromArray:localFilters];
         
         NSArray *cloudFilters = @[];
         [allFilters addObjectsFromArray:cloudFilters];
         
-        NSLog(@"[NosmaiAgoraPlugin] FINAL ALL FILTERS RETURNED: %@", allFilters);
         result([allFilters copy]);
     } @catch (NSException *exception) {
         result([FlutterError errorWithCode:@"GET_FILTERS_ERROR"
@@ -571,13 +564,9 @@
     if (bridge.nosmaiSDK) {
         @try {
             NSDictionary<NSString*, NSArray<NSDictionary*>*> *organizedFilters = [bridge.nosmaiSDK getInitialFilters];
-            NSLog(@"[NosmaiAgoraPlugin] ===== RAW DATA FROM getInitialFilters =====");
-            NSLog(@"[NosmaiAgoraPlugin] RAW ORGANIZED FILTERS: %@", organizedFilters);
-            NSLog(@"[NosmaiAgoraPlugin] RAW FILTER KEYS: %@", organizedFilters.allKeys);
             
             for (NSString *key in organizedFilters.allKeys) {
                 NSArray *filters = organizedFilters[key];
-                NSLog(@"[NosmaiAgoraPlugin] RAW KEY '%@' HAS %lu FILTERS:", key, (unsigned long)filters.count);
                 for (int i = 0; i < filters.count; i++) {
                     NSDictionary *filter = filters[i];
                     NSMutableDictionary *filterForLogging = [filter mutableCopy];
@@ -588,22 +577,13 @@
                     [filterForLogging removeObjectForKey:@"thumbnailData"];
                     [filterForLogging removeObjectForKey:@"imageData"];
                     
-                    NSLog(@"[NosmaiAgoraPlugin] RAW FILTER %d IN KEY '%@': %@", i, key, filterForLogging);
                 }
             }
-            NSLog(@"[NosmaiAgoraPlugin] ===== END RAW DATA =====");
             
-            if (organizedFilters && organizedFilters.count > 0) {
-                NSLog(@"[NosmaiAgoraPlugin] SDK returned valid organized filters, processing...");
-            } else {
-                NSLog(@"[NosmaiAgoraPlugin] SDK returned empty/null organized filters - organizedFilters: %@, count: %lu", 
-                      organizedFilters, (unsigned long)(organizedFilters ? organizedFilters.count : 0));
-            }
             
             if (organizedFilters && organizedFilters.count > 0) {
                 for (NSString *filterType in organizedFilters.allKeys) {
                     NSArray<NSDictionary*> *filtersOfType = organizedFilters[filterType];
-                    NSLog(@"[NosmaiAgoraPlugin] Processing filterType '%@' with %lu filters", filterType, (unsigned long)filtersOfType.count);
                     
                     for (NSDictionary *filter in filtersOfType) {
                         NSMutableDictionary *enhancedFilter = [filter mutableCopy];
@@ -624,23 +604,17 @@
                             enhancedFilter[@"isFree"] = @YES;
                         }
                         
-                        NSLog(@"[NosmaiAgoraPlugin] Filter from SDK - Name: %@, FilterType: %@", enhancedFilter[@"name"], filterType);
                         [localFilters addObject:enhancedFilter];
                     }
                 }
                 
-                NSLog(@"[NosmaiAgoraPlugin] Total filters from Nosmai SDK: %lu", (unsigned long)localFilters.count);
                 return [localFilters copy];
             }
         } @catch (NSException *exception) {
-            NSLog(@"[NosmaiAgoraPlugin] Error getting filters from Nosmai SDK: %@", exception.reason);
         }
     }
     
-    // Fallback to manual discovery if SDK method fails
-    NSLog(@"[NosmaiAgoraPlugin] Falling back to manual filter discovery");
     NSArray *discoveredFilterNames = [self discoverNosmaiFiltersInAssets];
-    NSLog(@"[NosmaiAgoraPlugin] Discovered filter names: %@", discoveredFilterNames);
     
     for (NSString *filterName in discoveredFilterNames) {
         // Try multiple filter path structures to match reference implementation
@@ -661,7 +635,6 @@
         }
         
         if (filePath && [[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
-            NSLog(@"[NosmaiAgoraPlugin] Found filter file for '%@' at path: %@", filterName, filePath);
             NSMutableDictionary *filterInfo = [NSMutableDictionary dictionary];
             
             filterInfo[@"id"] = filterName;
@@ -689,7 +662,6 @@
             // Try to get filter metadata from SDK
             if (bridge.nosmaiSDK && [bridge.nosmaiSDK respondsToSelector:@selector(getFilterInfoFromPath:)]) {
                 filterMetadata = [bridge.nosmaiSDK performSelector:@selector(getFilterInfoFromPath:) withObject:filePath];
-                NSLog(@"[NosmaiAgoraPlugin] Filter metadata for '%@': %@", filterName, filterMetadata);
             }
             
             if (filterMetadata && [filterMetadata isKindOfClass:[NSDictionary class]]) {
@@ -707,7 +679,6 @@
                     } else {
                         filterCategory = @"effect";
                     }
-                    NSLog(@"[NosmaiAgoraPlugin] Set filterType to '%@' from SDK metadata for '%@'", filterType, filterName);
                 }
                 
                 // Update other fields from metadata if available
@@ -731,7 +702,6 @@
                     filterInfo[@"category"] = filterMetadata[@"category"];
                 }
             } else {
-                NSLog(@"[NosmaiAgoraPlugin] No SDK metadata for filter '%@', using keyword-based classification", filterName);
                 
                 // Comprehensive keyword-based classification (following Agora implementation)
                 NSString *lowercaseName = [filterName lowercaseString];
@@ -775,20 +745,16 @@
                 if (isFilter) {
                     filterType = @"filter";
                     filterCategory = @"filter";
-                    NSLog(@"[NosmaiAgoraPlugin] Set filterType to 'filter' based on keyword match for '%@'", filterName);
                 } else if (isEffect) {
                     filterType = @"effect";
                     filterCategory = @"effect";
-                    NSLog(@"[NosmaiAgoraPlugin] Set filterType to 'effect' based on keyword match for '%@'", filterName);
                 } else {
                     // Default to effect if can't determine
                     filterType = @"effect";
                     filterCategory = @"effect";
-                    NSLog(@"[NosmaiAgoraPlugin] Set filterType to 'effect' as default for '%@'", filterName);
                 }
             }
             
-            NSLog(@"[NosmaiAgoraPlugin] Final filterType for '%@': %@", filterName, filterType);
             filterInfo[@"filterType"] = filterType;
             filterInfo[@"filterCategory"] = filterCategory;
             filterInfo[@"sourceType"] = filterCategory;
@@ -847,14 +813,11 @@
             NSMutableDictionary *filterInfoForLogging = [filterInfo mutableCopy];
             [filterInfoForLogging removeObjectForKey:@"previewImageBase64"];
             [filterInfoForLogging removeObjectForKey:@"previewUrl"];
-            NSLog(@"[NosmaiAgoraPlugin] Complete filter object for '%@': %@", filterName, filterInfoForLogging);
             [localFilters addObject:[filterInfo copy]];
         } else {
-            NSLog(@"[NosmaiAgoraPlugin] No valid file path found for filter: %@", filterName);
         }
     }
     
-    NSLog(@"[NosmaiAgoraPlugin] Total local filters found (FALLBACK METHOD): %lu", (unsigned long)localFilters.count);
     // Don't log the full array as it may contain image data
     return [localFilters copy];
 }

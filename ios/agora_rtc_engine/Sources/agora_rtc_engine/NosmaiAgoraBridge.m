@@ -200,10 +200,15 @@
             initResult = success;
             if (success) {
                 strongSelf.nosmaiInitialized = YES;
-                
+
                 // Initialize NosmaiSDK as well for backward compatibility
                 strongSelf.nosmaiSDK = [NosmaiSDK initWithLicense:licenseKey];
-                
+
+                // 🎯 Set default camera position to FRONT for camera preview
+                // (back camera is default for streaming)
+                strongSelf.currentCameraPosition = NosmaiCameraPositionFront;
+                NSLog(@"✅ [NosmaiAgora] Default camera position set to: front");
+
             } else {
             }
             completed = YES;
@@ -390,7 +395,8 @@
     self.isCleaningUp = YES;
     self.allowPush = NO;
     self.channelJoined = NO;
-    self.localPreviewView = nil;
+    // ⚠️ DO NOT clear localPreviewView - camera mode will reuse it!
+    // self.localPreviewView = nil;
     [self stopCamera]; 
     [NSThread sleepForTimeInterval:0.8];
 #if HAS_NOSMAI_FRAMEWORK
@@ -1084,8 +1090,7 @@
         // Fix video orientation for initial camera setup
         [self fixVideoOrientationForCamera:frontCamera];
         
-        // Set initial mirror state to OFF for all cameras (user can toggle manually)
-        self.mirrorModeEnabled = NO;
+        self.mirrorModeEnabled = YES;
         
         [self.captureSession commitConfiguration];
         
@@ -1265,58 +1270,71 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     if (!self.nosmaiInitialized) {
         return NO;
     }
-    
+
     @try {
-        
+
+        if (self.nosmaiCamera) {
+            [self.nosmaiCamera stopCapture];
+            [self.nosmaiCamera detachFromView];
+            self.nosmaiCamera = nil;
+            [NSThread sleepForTimeInterval:0.3];
+        }
+
+        // Now safe to stop SDK and switch modes
+        if (self.nosmaiSDK) {
+            @try {
+                [self.nosmaiSDK stopProcessing];
+                [NSThread sleepForTimeInterval:0.2];
+                [self.nosmaiSDK setProcessingMode:NosmaiProcessingModeLive];
+
+            } @catch (NSException *e) {
+            }
+        }
+
         // For Camera Mode: Use NosmaiCore.camera directly (not storing in property)
         NosmaiCamera *camera = [[NosmaiCore shared] camera];
         if (!camera) {
             return NO;
         }
         
-        // Store reference for later use
         self.nosmaiCamera = camera;
         
-        // Configure camera for recording (like reference implementation)
         NosmaiCameraConfig *config = [[NosmaiCameraConfig alloc] init];
-        config.position = self.currentCameraPosition; // Use current position
-        config.sessionPreset = @"AVCaptureSessionPresetHigh"; // High quality for recording
+        config.position = self.currentCameraPosition; 
+        config.sessionPreset = @"AVCaptureSessionPresetHigh"; 
         config.frameRate = 30;
         
         [camera updateConfiguration:config];
         [camera setDelegate:self];
         
-        // Essential dual attachment (like reference implementation)
         if (self.localPreviewView) {
             [camera attachToView:self.localPreviewView];
-            
+
             // Also set preview view for NosmaiSDK (dual attachment)
             if (self.nosmaiSDK) {
                 [self.nosmaiSDK setPreviewView:self.localPreviewView];
             }
+        } else {
         }
-        
-        // Start camera capture first (like reference implementation)
+
+        if (self.nosmaiSDK) {
+            [self.nosmaiSDK startProcessing];
+            [NSThread sleepForTimeInterval:0.1];
+        }
+
+        // Now safe to start camera capture
         BOOL success = [camera startCapture];
         if (success) {
-            
-            // Then start NosmaiSDK processing (like reference implementation)
-            if (self.nosmaiSDK) {
-                [self.nosmaiSDK startProcessing];
-                NSLog(@"NosmaiAgora: NosmaiSDK processing started");
-            }
-            
             self.isStandaloneCameraActive = YES;
             self.currentCameraPosition = camera.position;
-            NSLog(@"NosmaiAgora: Camera started at position: %@", 
-                  (self.currentCameraPosition == NosmaiCameraPositionFront) ? @"front" : @"back");
         } else {
-            NSLog(@"NosmaiAgora: Failed to start NosmaiCore.camera");
+            if (self.nosmaiSDK) {
+                [self.nosmaiSDK stopProcessing];
+            }
         }
-        
+
         return success;
     } @catch (NSException *exception) {
-        NSLog(@"NosmaiAgora: Failed to start camera processing: %@", exception.reason);
         return NO;
     }
 #else
@@ -1327,25 +1345,19 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 - (BOOL)stopProcessing {
 #if HAS_NOSMAI_FRAMEWORK
     @try {
-        NSLog(@"NosmaiAgora: Stopping camera processing");
-        
-        // Stop SDK processing first (like reference implementation)
         if (self.nosmaiSDK) {
             [self.nosmaiSDK stopProcessing];
-            NSLog(@"NosmaiAgora: NosmaiSDK processing stopped");
         }
         
         // Then stop camera capture (like reference implementation)
         if (self.nosmaiCamera) {
             [self.nosmaiCamera stopCapture];
             [self.nosmaiCamera detachFromView];
-            NSLog(@"NosmaiAgora: NosmaiCamera stopped and detached");
         }
         
         self.isStandaloneCameraActive = NO;
         return YES;
     } @catch (NSException *exception) {
-        NSLog(@"NosmaiAgora: Failed to stop camera processing: %@", exception.reason);
         return NO;
     }
 #else
@@ -1356,22 +1368,17 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 - (BOOL)switchCamera {
 #if HAS_NOSMAI_FRAMEWORK
     if (!self.isStandaloneCameraActive || !self.nosmaiCamera) {
-        NSLog(@"NosmaiAgora: Camera not active, cannot switch");
         return NO;
     }
     
     @try {
-        NSLog(@"NosmaiAgora: Switching camera");
         
         BOOL success = [self.nosmaiCamera switchCamera];
         if (success) {
             // Update current position
             self.currentCameraPosition = (self.currentCameraPosition == NosmaiCameraPositionFront) ? 
                 NosmaiCameraPositionBack : NosmaiCameraPositionFront;
-            NSLog(@"NosmaiAgora: Camera switched to %@", 
-                  (self.currentCameraPosition == NosmaiCameraPositionFront) ? @"front" : @"back");
         } else {
-            NSLog(@"NosmaiAgora: Failed to switch camera");
         }
         return success;
     } @catch (NSException *exception) {
@@ -1578,50 +1585,6 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 }
 
 - (BOOL)setTorchMode:(NSString *)torchMode {
-    // Previous Nosmai-based torch implementation (commented out)
-    /*
-#if HAS_NOSMAI_FRAMEWORK
-    @try {
-        
-        // Check if we're in camera mode
-        if (!self.isStandaloneCameraActive) {
-            return NO;
-        }
-        
-        // Get current camera from NosmaiCore
-        NosmaiCamera *camera = [[NosmaiCore shared] camera];
-        if (!camera) {
-            return NO;
-        }
-        
-        // Check if camera has torch capability first
-        if (![camera hasTorch]) {
-            return NO;
-        }
-        
-        // Check if camera is capturing
-        if (![camera isCapturing]) {
-            return NO;
-        }
-        
-        AVCaptureTorchMode mode = AVCaptureTorchModeOff;
-        if ([torchMode isEqualToString:@"auto"]) {
-            mode = AVCaptureTorchModeAuto;
-        } else if ([torchMode isEqualToString:@"on"]) {
-            mode = AVCaptureTorchModeOn;
-        }
-        
-        BOOL success = [camera setTorchMode:mode];
-        return success;
-    } @catch (NSException *exception) {
-        return NO;
-    }
-#else
-    return NO;
-#endif
-    */
-    
-    // Native iOS torch implementation
     @try {
         // Get current capture device
         AVCaptureDevice *currentDevice = nil;
@@ -1651,21 +1614,17 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
             mode = AVCaptureTorchModeOn;
         }
         
-        // Check if the mode is supported
         if (![currentDevice isTorchModeSupported:mode]) {
             return NO;
         }
         
-        // Lock device for configuration
         NSError *error = nil;
         if (![currentDevice lockForConfiguration:&error]) {
             return NO;
         }
         
-        // Set torch mode
         currentDevice.torchMode = mode;
         
-        // Unlock device
         [currentDevice unlockForConfiguration];
         
         return YES;
