@@ -10,6 +10,7 @@
 #import <Flutter/Flutter.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
+#import "NosmaiAgoraBridge.h"
 
 #if __has_include(<nosmai/Nosmai.h>)
 #import <nosmai/Nosmai.h>
@@ -56,7 +57,6 @@
         _previewView = [[UIView alloc] initWithFrame:validFrame];
         _previewView.backgroundColor = [UIColor blackColor];
         _previewView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        
 #if HAS_NOSMAI_FRAMEWORK
         // Get shared NosmaiSDK instance from NosmaiAgoraBridge
         @try {
@@ -70,7 +70,17 @@
         } @catch (NSException *exception) {
             NSLog(@"NosmaiNativeCameraView: Failed to get NosmaiSDK: %@", exception.reason);
         }
-        
+
+        // Always register this preview view with the bridge so it becomes the active surface
+        NosmaiAgoraBridge *bridge = [NosmaiAgoraBridge sharedInstance];
+        if ([NSThread isMainThread]) {
+            [bridge setLocalPreviewView:_previewView];
+        } else {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [bridge setLocalPreviewView:_previewView];
+            });
+        }
+
         // Start Nosmai's native camera after a short delay
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self startNosmaiCamera];
@@ -113,16 +123,19 @@
 
 - (void)stopNosmaiCamera {
 #if HAS_NOSMAI_FRAMEWORK
-    if (!_nosmaiSDK || !_cameraStarted) {
-        return;
+    if (_nosmaiSDK && _cameraStarted) {
+        @try {
+            [_nosmaiSDK stopProcessing];
+            _cameraStarted = NO;
+            NSLog(@"NosmaiNativeCameraView: Stopped Nosmai native camera");
+        } @catch (NSException *exception) {
+            NSLog(@"NosmaiNativeCameraView: Failed to stop camera: %@", exception.reason);
+        }
     }
-    
-    @try {
-        [_nosmaiSDK stopProcessing];
-        _cameraStarted = NO;
-        NSLog(@"NosmaiNativeCameraView: Stopped Nosmai native camera");
-    } @catch (NSException *exception) {
-        NSLog(@"NosmaiNativeCameraView: Failed to stop camera: %@", exception.reason);
+
+    NosmaiAgoraBridge *bridge = [NosmaiAgoraBridge sharedInstance];
+    if ([bridge getLocalPreviewView] == _previewView) {
+        [bridge setLocalPreviewView:nil];
     }
 #endif
 }

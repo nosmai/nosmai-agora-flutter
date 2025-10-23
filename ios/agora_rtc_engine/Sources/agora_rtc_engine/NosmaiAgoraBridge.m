@@ -1273,6 +1273,12 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 
     @try {
 
+        UIView *previewView = self.localPreviewView;
+        if (!previewView) {
+            NSLog(@"⚠️ [NosmaiAgora] startProcessing aborted: no preview view registered");
+            return NO;
+        }
+
         if (self.nosmaiCamera) {
             [self.nosmaiCamera stopCapture];
             [self.nosmaiCamera detachFromView];
@@ -1307,12 +1313,12 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         [camera updateConfiguration:config];
         [camera setDelegate:self];
         
-        if (self.localPreviewView) {
-            [camera attachToView:self.localPreviewView];
+        if (previewView) {
+            [camera attachToView:previewView];
 
             // Also set preview view for NosmaiSDK (dual attachment)
             if (self.nosmaiSDK) {
-                [self.nosmaiSDK setPreviewView:self.localPreviewView];
+                [self.nosmaiSDK setPreviewView:previewView];
             }
         } else {
         }
