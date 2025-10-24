@@ -289,6 +289,9 @@ public class NosmaiAgoraBridge {
             // Step 4: Set client role to broadcaster
             agoraEngine.setClientRole(Constants.CLIENT_ROLE_BROADCASTER);
 
+            // Step 4.5: Set initial video encoder configuration with mirror disabled
+            applyEncoderMirror(false);
+
             // Step 5: Initialize Nosmai processing
             if (!nosmaiInitialized || storedLicenseKey == null) {
                 Log.e(TAG, "Nosmai not initialized. Call initialize() first");
@@ -455,6 +458,9 @@ public class NosmaiAgoraBridge {
                 videoFrame.height = frame.height; // 1280
                 videoFrame.timeStamp = frame.timestampNs / 1000000; // Convert ns to ms
                 videoFrame.rotation = 0; // Already portrait from Nosmai
+
+                // NOTE: Mirror mode is set at encoder level via setVideoEncoderConfiguration
+                // See applyEncoderMirror() method
 
                 // Push frame to Agora
                 boolean success = agoraEngine.pushExternalVideoFrame(videoFrame);
@@ -810,12 +816,51 @@ public class NosmaiAgoraBridge {
     public boolean toggleMirror(boolean enabled) {
         try {
             mirrorModeEnabled = enabled;
+
+            // 🎯 NosmaiSDK has INVERTED logic: false = mirror, true = normal
             NosmaiSDK.setMirrorX(enabled);
-            Log.i(TAG, "Mirror mode " + (enabled ? "enabled" : "disabled"));
+
+            // 🎯 Agora encoder has NORMAL logic: true = mirror, false = normal
+            // So we INVERT the boolean to match NosmaiSDK behavior
+            applyEncoderMirror(!enabled);
+
+            Log.i(TAG, "Mirror mode " + (enabled ? "enabled" : "disabled") +
+                  " (NosmaiSDK=" + enabled + ", Agora=" + !enabled + ")");
             return true;
         } catch (Exception e) {
             Log.e(TAG, "Error toggling mirror", e);
             return false;
+        }
+    }
+
+    /**
+     * Apply mirror mode at encoder level for Agora streaming
+     * This ensures remote viewers see mirrored video
+     */
+    private void applyEncoderMirror(boolean enabled) {
+        if (agoraEngine == null) {
+            Log.w(TAG, "Cannot apply encoder mirror - Agora engine not initialized");
+            return;
+        }
+
+        try {
+            io.agora.rtc2.video.VideoEncoderConfiguration config =
+                new io.agora.rtc2.video.VideoEncoderConfiguration(
+                    new io.agora.rtc2.video.VideoEncoderConfiguration.VideoDimensions(720, 1280),
+                    io.agora.rtc2.video.VideoEncoderConfiguration.FRAME_RATE.FRAME_RATE_FPS_30,
+                    io.agora.rtc2.video.VideoEncoderConfiguration.STANDARD_BITRATE,
+                    io.agora.rtc2.video.VideoEncoderConfiguration.ORIENTATION_MODE.ORIENTATION_MODE_FIXED_PORTRAIT
+                );
+
+            // Set mirror mode for remote viewers (use proper enum type)
+            config.mirrorMode = enabled
+                ? io.agora.rtc2.video.VideoEncoderConfiguration.MIRROR_MODE_TYPE.MIRROR_MODE_ENABLED
+                : io.agora.rtc2.video.VideoEncoderConfiguration.MIRROR_MODE_TYPE.MIRROR_MODE_DISABLED;
+
+            agoraEngine.setVideoEncoderConfiguration(config);
+            Log.i(TAG, "Encoder mirror mode applied: " + (enabled ? "enabled" : "disabled"));
+        } catch (Exception e) {
+            Log.e(TAG, "Error applying encoder mirror", e);
         }
     }
 
