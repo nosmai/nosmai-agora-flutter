@@ -100,11 +100,12 @@ public class Camera2Helper {
     }
 
     public void stopCamera() {
-        Log.d(TAG, "Stopping camera...");
         try {
+            if (mFrameCallback != null) {
+                mFrameCallback = null;
+            }
             closeCamera();
             stopBackgroundThread();
-            Log.d(TAG, "✅ Camera stopped successfully");
         } catch (Exception e) {
             Log.e(TAG, "Error during camera stop: " + e.getMessage());
         }
@@ -124,7 +125,6 @@ public class Camera2Helper {
                 mBackgroundThread = null;
                 mBackgroundHandler = null;
             } catch (InterruptedException e) {
-                Log.e(TAG, "Interrupted when stopping background thread", e);
             }
         }
     }
@@ -141,7 +141,6 @@ public class Camera2Helper {
         try {
             String cameraId = getCameraId(manager);
             if (cameraId == null) {
-                Log.e(TAG, "❌ Failed to find appropriate camera");
                 return;
             }
 
@@ -150,16 +149,12 @@ public class Camera2Helper {
             StreamConfigurationMap map =
                     mCameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             if (map == null) {
-                Log.e(TAG, "❌ Cannot get available preview sizes");
                 return;
             }
 
             // Get sensor orientation
             mSensorOrientation = mCameraCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
-            Log.i(TAG, "📐 Sensor orientation: " + mSensorOrientation);
-
             mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class), 1280, 720);
-            Log.i(TAG, "📏 Preview size: " + mPreviewSize.getWidth() + "x" + mPreviewSize.getHeight());
 
             mImageReader = ImageReader.newInstance(
                     mPreviewSize.getWidth(), mPreviewSize.getHeight(),
@@ -173,9 +168,7 @@ public class Camera2Helper {
             manager.openCamera(cameraId, mStateCallback, mBackgroundHandler);
 
         } catch (CameraAccessException e) {
-            Log.e(TAG, "❌ Failed to access camera", e);
         } catch (InterruptedException e) {
-            Log.e(TAG, "❌ Interrupted while trying to lock camera opening", e);
         }
     }
 
@@ -185,18 +178,15 @@ public class Camera2Helper {
                 CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId);
                 Integer facing = characteristics.get(CameraCharacteristics.LENS_FACING);
                 if (facing != null && facing == mCurrentCameraFacing) {
-                    Log.i(TAG, "✅ Found camera: " + cameraId + " (facing: " +
-                            (facing == CameraCharacteristics.LENS_FACING_FRONT ? "front" : "back") + ")");
                     return cameraId;
                 }
             }
             if (manager.getCameraIdList().length > 0) {
                 String fallbackId = manager.getCameraIdList()[0];
-                Log.w(TAG, "⚠️ Requested camera not found, using fallback: " + fallbackId);
                 return fallbackId;
             }
         } catch (CameraAccessException e) {
-            Log.e(TAG, "❌ Failed to get camera ID", e);
+            Log.e(TAG, "Failed to get camera ID", e);
         }
         return null;
     }
@@ -228,12 +218,10 @@ public class Camera2Helper {
             mCameraDevice = cameraDevice;
             createCaptureSession();
             mIsCameraOpened = true;
-            Log.i(TAG, "✅ Camera opened successfully");
         }
 
         @Override
         public void onDisconnected(@NonNull CameraDevice cameraDevice) {
-            Log.w(TAG, "⚠️ Camera device disconnected - cleaning up resources");
             mCameraOpenCloseLock.release();
             cameraDevice.close();
             mCameraDevice = null;
@@ -246,7 +234,6 @@ public class Camera2Helper {
 
         @Override
         public void onError(@NonNull CameraDevice cameraDevice, int error) {
-            Log.e(TAG, "❌ Camera device error: " + error + " - cleaning up resources");
             mCameraOpenCloseLock.release();
             cameraDevice.close();
             mCameraDevice = null;
@@ -282,7 +269,6 @@ public class Camera2Helper {
                             try {
                                 // Get best supported FPS range for optimal performance
                                 Range<Integer> fpsRange = getBestFpsRange();
-                                Log.i(TAG, "📊 Using FPS range: " + fpsRange);
                                 mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange);
 
                                 // Set auto-exposure and auto-focus for stability
@@ -294,49 +280,91 @@ public class Camera2Helper {
                                 CaptureRequest request = mPreviewRequestBuilder.build();
                                 mCaptureSession.setRepeatingRequest(request, null, mBackgroundHandler);
 
-                                Log.i(TAG, "✅ Capture session configured successfully");
 
                             } catch (CameraAccessException e) {
-                                Log.e(TAG, "❌ Failed to set up capture request", e);
+                                Log.e(TAG, "Failed to set up capture request", e);
                             }
                         }
 
                         @Override
                         public void onConfigureFailed(@NonNull CameraCaptureSession cameraCaptureSession) {
-                            Log.e(TAG, "❌ Failed to configure capture session");
+                            Log.e(TAG, "Failed to configure capture session");
                         }
                     }, mBackgroundHandler);
 
         } catch (CameraAccessException e) {
-            Log.e(TAG, "❌ Failed to create capture session", e);
+            Log.e(TAG, "Failed to create capture session", e);
         }
     }
 
     private void closeCamera() {
         try {
             mCameraOpenCloseLock.acquire();
-
             if (mCaptureSession != null) {
-                mCaptureSession.close();
-                mCaptureSession = null;
-            }
-
-            if (mCameraDevice != null) {
-                mCameraDevice.close();
-                mCameraDevice = null;
+                try {
+                    mCaptureSession.stopRepeating();
+                    Thread.sleep(100);
+                } catch (Exception e) {
+                    Log.w(TAG, "Failed to stop repeating request: " + e.getMessage());
+                }
             }
 
             if (mImageReader != null) {
-                mImageReader.close();
-                mImageReader = null;
+                try {
+                    mImageReader.setOnImageAvailableListener(null, null);
+                } catch (Exception e) {
+                    Log.w(TAG, "Failed to clear ImageReader listener: " + e.getMessage());
+                }
             }
+
+            if (mCaptureSession != null) {
+                try {
+                    Log.d(TAG, "Closing capture session...");
+                    mCaptureSession.close();
+                    mCaptureSession = null;
+
+                    Thread.sleep(50);
+                } catch (Exception e) {
+                    Log.w(TAG, "Error closing capture session: " + e.getMessage());
+                    mCaptureSession = null;
+                }
+            }
+
+            if (mCameraDevice != null) {
+                try {
+                    Log.d(TAG, "Closing camera device...");
+                    mCameraDevice.close();
+                    mCameraDevice = null;
+
+                    // 🎯 Wait for device to fully release
+                    Thread.sleep(100);
+                } catch (Exception e) {
+                    Log.w(TAG, "Error closing camera device: " + e.getMessage());
+                    mCameraDevice = null;
+                }
+            }
+
+            // Finally close ImageReader
+            if (mImageReader != null) {
+                try {
+                    mImageReader.close();
+                    mImageReader = null;
+                } catch (Exception e) {
+                    Log.w(TAG, "Error closing ImageReader: " + e.getMessage());
+                    mImageReader = null;
+                }
+            }
+
+            // Clear preview surface reference
             mPreviewSurface = null;
 
+            // Update camera state
             mIsCameraOpened = false;
 
             // Cleanup reuse buffer
             mReuseBuffer = null;
             mLastBufferSize = 0;
+
 
         } catch (InterruptedException e) {
             Log.e(TAG, "Interrupted while trying to lock camera closing", e);
@@ -372,12 +400,19 @@ public class Camera2Helper {
                 public void onImageAvailable(ImageReader reader) {
                     Image image = null;
                     try {
+                        // 🎯 SAFETY CHECK: Don't process frames if camera is not opened
+                        // This prevents processing during shutdown
+                        if (!mIsCameraOpened || mCameraDevice == null) {
+                            return;
+                        }
+
                         image = reader.acquireLatestImage();
                         if (image == null) {
                             return;
                         }
 
-                        // A callback must be registered
+                        // 🎯 SAFETY CHECK: Callback must be registered
+                        // If null, we're shutting down - close image and return
                         if (mFrameCallback == null) {
                             image.close();
                             return;
@@ -400,7 +435,7 @@ public class Camera2Helper {
                         );
 
                     } catch (final Exception e) {
-                        Log.e(TAG, "❌ Error in onImageAvailable: ", e);
+                        Log.e(TAG, "Error in onImageAvailable: ", e);
                     } finally {
                         if (image != null) {
                             image.close();
@@ -468,7 +503,7 @@ public class Camera2Helper {
                 mCaptureSession.setRepeatingRequest(mPreviewRequestBuilder.build(),
                         null, mBackgroundHandler);
             } catch (CameraAccessException e) {
-                Log.e(TAG, "❌ Failed to update flash mode", e);
+                Log.e(TAG, "Failed to update flash mode", e);
             }
         }
     }
@@ -477,19 +512,13 @@ public class Camera2Helper {
      * Switch camera (requires restart)
      */
     public void switchCamera() {
-        Log.i(TAG, "🔄 Switching camera...");
 
         // Switch facing
         mCurrentCameraFacing = (mCurrentCameraFacing == CameraCharacteristics.LENS_FACING_FRONT)
                 ? CameraCharacteristics.LENS_FACING_BACK
                 : CameraCharacteristics.LENS_FACING_FRONT;
-
-        // Restart camera with new facing
         stopCamera();
         startCamera();
-
-        Log.i(TAG, "✅ Camera switched to: " +
-                (mCurrentCameraFacing == CameraCharacteristics.LENS_FACING_FRONT ? "front" : "back"));
     }
 
     /**
@@ -498,7 +527,6 @@ public class Camera2Helper {
      */
     private Range<Integer> getBestFpsRange() {
         if (mCameraCharacteristics == null) {
-            Log.w(TAG, "⚠️ Camera characteristics not available, using default 15-30 FPS");
             return new Range<>(15, 30);
         }
 
@@ -507,20 +535,12 @@ public class Camera2Helper {
             Range<Integer>[] fpsRanges = mCameraCharacteristics.get(
                     CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
             if (fpsRanges == null || fpsRanges.length == 0) {
-                Log.w(TAG, "⚠️ No FPS ranges available, using default");
                 return new Range<>(15, 30);
-            }
-
-            // Log all available FPS ranges for debugging
-            Log.d(TAG, "📊 Available FPS ranges:");
-            for (Range<Integer> range : fpsRanges) {
-                Log.d(TAG, "   - " + range.getLower() + " to " + range.getUpper() + " FPS");
             }
 
             // Priority 1: Try to find 30 FPS fixed
             for (Range<Integer> range : fpsRanges) {
                 if (range.getLower() >= 30 && range.getUpper() >= 30) {
-                    Log.i(TAG, "✅ Selected: 30 FPS fixed range");
                     return new Range<>(30, 30);
                 }
             }
@@ -528,7 +548,6 @@ public class Camera2Helper {
             // Priority 2: Try to find range that includes 30 FPS
             for (Range<Integer> range : fpsRanges) {
                 if (range.getLower() <= 30 && range.getUpper() >= 30) {
-                    Log.i(TAG, "✅ Selected: Variable range with 30 FPS max");
                     return range;
                 }
             }
@@ -541,11 +560,10 @@ public class Camera2Helper {
                 }
             }
 
-            Log.i(TAG, "✅ Selected: Best available range " + bestRange);
             return bestRange;
 
         } catch (Exception e) {
-            Log.e(TAG, "❌ Error getting FPS ranges: " + e.getMessage());
+            Log.e(TAG, "Error getting FPS ranges: " + e.getMessage());
             return new Range<>(15, 30);
         }
     }

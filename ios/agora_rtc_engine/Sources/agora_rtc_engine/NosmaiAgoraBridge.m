@@ -207,7 +207,6 @@
                 // 🎯 Set default camera position to FRONT for camera preview
                 // (back camera is default for streaming)
                 strongSelf.currentCameraPosition = NosmaiCameraPositionFront;
-                NSLog(@"✅ [NosmaiAgora] Default camera position set to: front");
 
             } else {
             }
@@ -538,12 +537,7 @@
 
 - (BOOL)enableLocalVideo:(BOOL)enabled {
     if (!self.agoraEngine) return NO;
-
-    // ✅ For custom camera: Control frame pushing via allowPush flag
-    // (NOT Agora's enableLocalVideo, which is for standard camera)
     self.allowPush = enabled;
-    NSLog(@"📹 [NosmaiAgora] Local video %@", enabled ? @"ENABLED" : @"DISABLED");
-
     return YES;
 }
 
@@ -879,11 +873,6 @@
     @try {
         // Apply effect synchronously like reference implementation
         BOOL success = [self.nosmaiSDK applyEffectSync:effectPath];
-        if (success) {
-            NSLog(@"NosmaiAgora: ✅ Effect applied successfully: %@", effectPath);
-        } else {
-            NSLog(@"NosmaiAgora: ❌ Failed to apply effect: %@", effectPath);
-        }
         return success;
     } @catch (NSException *exception) {
         NSLog(@"NosmaiAgora: ❌ Exception while applying effect: %@", exception.reason);
@@ -915,9 +904,7 @@
     // Apply effect asynchronously like reference implementation
     [self.nosmaiSDK applyEffect:effectPath completion:^(BOOL success, NSError *error) {
         if (success) {
-            NSLog(@"NosmaiAgora: ✅ Effect applied successfully (async): %@", effectPath);
         } else {
-            NSLog(@"NosmaiAgora: ❌ Failed to apply effect (async): %@", effectPath);
         }
         if (completion) completion(success, error);
     }];
@@ -1005,9 +992,8 @@
 
 - (void)rtcEngine:(AgoraRtcEngineKit *)engine didJoinChannel:(NSString *)channel withUid:(NSUInteger)uid elapsed:(NSInteger)elapsed {
 
-    // 🛡️ CRITICAL: Don't set flags if cleanup is in progress
     if (self.isCleaningUp) {
-        NSLog(@"⚠️ [NosmaiAgora] Ignoring didJoinChannel - cleanup in progress");
+        NSLog(@"[NosmaiAgora] Ignoring didJoinChannel - cleanup in progress");
         return;
     }
 
@@ -1015,7 +1001,7 @@
     self.currentChannelId = channel;
     self.currentUserId = uid;
     self.allowPush = YES;
-    NSLog(@"✅ [NosmaiAgora] Joined channel: %@ with uid: %lu", channel, (unsigned long)uid);
+    NSLog(@"[NosmaiAgora] Joined channel: %@ with uid: %lu", channel, (unsigned long)uid);
 
 }
 

@@ -36,8 +36,6 @@ public class NosmaiAgoraPlugin implements FlutterPlugin, MethodCallHandler {
 
         // Initialize bridge singleton
         bridge = NosmaiAgoraBridge.getInstance(context);
-
-        Log.i(TAG, "✅ NosmaiAgoraPlugin attached to engine");
     }
 
     @Override

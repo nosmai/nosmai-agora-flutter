@@ -660,37 +660,22 @@ public class NosmaiAgoraBridge {
     public boolean enableLocalVideo(boolean enabled) {
         if (agoraEngine == null) return false;
         try {
-            // ✅ Control frame pushing via allowPush flag
             allowPush = enabled;
-            Log.i(TAG, "📹 Local video " + (enabled ? "ENABLED" : "DISABLED"));
-
-            // Also call Agora's method (for compatibility)
             agoraEngine.enableLocalVideo(enabled);
-
-            // 🎯 FIX: Restart Nosmai processing (not camera) when re-enabling
             if (enabled) {
-                Log.i(TAG, "Re-enabling camera - restarting Nosmai processing");
-
                 if (previewView != null) {
                     try {
-                        // Stop and restart Nosmai processing to refresh GPU pipeline
                         NosmaiSDK.stopProcessing();
-
-                        // Small delay for cleanup
                         try {
                             Thread.sleep(50);
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                         }
-
-                        // Restart processing with existing preview view
                         NosmaiSDK.startProcessing(previewView);
                         NosmaiSDK.setRenderMode(NosmaiSDK.RenderMode.DUAL_OUTPUT);
 
-                        // Re-setup frame callback for streaming
                         setupFrameCallbackForStreaming();
 
-                        // Re-apply camera orientation
                         if (camera2Helper != null) {
                             previewView.setCameraOrientation(
                                 camera2Helper.isFrontCamera(),
@@ -700,11 +685,7 @@ public class NosmaiAgoraBridge {
                             NosmaiSDK.setCameraFacing(camera2Helper.isFrontCamera());
                         }
 
-                        Log.i(TAG, "✅ Nosmai processing restarted successfully");
                     } catch (Exception e) {
-                        Log.e(TAG, "Failed to restart processing, attempting full re-init", e);
-
-                        // Fallback: Re-initialize from stored license
                         if (storedLicenseKey != null) {
                             NosmaiSDK.initialize(context, storedLicenseKey);
                             NosmaiSDK.startProcessing(previewView);
@@ -871,12 +852,7 @@ public class NosmaiAgoraBridge {
     public boolean applySkinSmoothing(float level) {
         try {
             skinSmoothingLevel = level;
-
-            // ✅ DIRECT EXECUTION: No debouncing needed
-            // Flutter uses manual apply pattern (user clicks Apply button)
-            // Debouncing would queue filters and cause batch execution
             NosmaiBeauty.applySkinSmoothing(level);
-
             return true;
         } catch (Exception e) {
             Log.e(TAG, "Error applying skin smoothing", e);
