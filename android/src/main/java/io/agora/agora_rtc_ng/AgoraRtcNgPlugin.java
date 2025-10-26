@@ -72,6 +72,11 @@ public class AgoraRtcNgPlugin implements FlutterPlugin, MethodChannel.MethodCall
         flutterPluginBinding.getPlatformViewRegistry().registerViewFactory(
                 "nosmai_native_camera",
                 new NosmaiPlatformViewFactory(bridge));
+
+        // Register remote video view backed by Nosmai's internal Agora engine
+        flutterPluginBinding.getPlatformViewRegistry().registerViewFactory(
+                "nosmai_remote_video",
+                new NosmaiRemoteVideoViewFactory(bridge));
     }
 
     @Override

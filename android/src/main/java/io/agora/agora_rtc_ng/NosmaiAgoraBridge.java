@@ -522,8 +522,10 @@ public class NosmaiAgoraBridge {
             // Stop camera capture
             if (camera2Helper != null) {
                 camera2Helper.stopCamera();
+                // 🎯 CRITICAL: Clear frame callback to prevent memory leaks
+                camera2Helper.setFrameCallback(null);
                 camera2Helper = null;
-                Log.i(TAG, "Camera2Helper stopped");
+                Log.i(TAG, "Camera2Helper stopped and callback cleared");
             }
 
             // Stop Nosmai processing
@@ -625,8 +627,10 @@ public class NosmaiAgoraBridge {
             // Stop camera capture
             if (camera2Helper != null) {
                 camera2Helper.stopCamera();
+                // 🎯 CRITICAL: Clear frame callback to prevent memory leaks
+                camera2Helper.setFrameCallback(null);
                 camera2Helper = null;
-                Log.i(TAG, "Camera2Helper stopped");
+                Log.i(TAG, "Camera2Helper stopped and callback cleared");
             }
 
             // Stop Nosmai processing
@@ -756,24 +760,52 @@ public class NosmaiAgoraBridge {
         }
 
         try {
-            // PRE-CALCULATE next camera state BEFORE switching
-            boolean currentlyFront = camera2Helper.isFrontCamera();
-            boolean willBeFront = !currentlyFront;  // Next camera will be opposite of current
+            // 🎯 CRITICAL FIX: Proper sequence to prevent mirror glitch and freeze
+            Log.i(TAG, "🔄 Starting camera flip sequence...");
 
-            // SET mirror mode FIRST (before camera switch to prevent visual glitch)
+            // Step 1: Calculate next camera state BEFORE stopping
+            boolean currentlyFront = camera2Helper.isFrontCamera();
+            boolean willBeFront = !currentlyFront;
+            Log.i(TAG, "📸 Current: " + (currentlyFront ? "front" : "back") + " → Next: " + (willBeFront ? "front" : "back"));
+
+            // Step 2: Stop current camera completely (synchronous)
+            // This ensures no frames are processed during transition
+            Log.i(TAG, "⏸️  Stopping current camera...");
+            camera2Helper.stopCamera();
+            Log.i(TAG, "✅ Current camera stopped");
+
+            // Step 3: Set camera facing for next camera
+            // This must be done BEFORE setting mirror to ensure correct association
+            if (willBeFront) {
+                camera2Helper.setFrontFacing();
+            } else {
+                camera2Helper.setBackFacing();
+            }
+            Log.i(TAG, "✅ Camera facing updated to " + (willBeFront ? "front" : "back"));
+
+            // Step 4: Set mirror mode for the NEW camera (no current frames to affect!)
             NosmaiSDK.setMirrorX(willBeFront);
             NosmaiSDK.setCameraFacing(willBeFront);
+            Log.i(TAG, "✅ Local mirror set: " + (willBeFront ? "mirrored (front)" : "normal (back)"));
 
-            // NOW switch camera hardware (preview will show with correct mirroring from first frame)
-            camera2Helper.switchCamera();
+            // Step 4.5: 🎯 CRITICAL FIX: Update encoder mirror for remote viewers
+            // Both front and back cameras should NOT be mirrored on remote side
+            // Front camera: Broadcaster sees mirrored (selfie), but remote sees you normally
+            // Back camera: Both broadcaster and remote see world normally
+            applyEncoderMirror(false);
+            Log.i(TAG, "✅ Remote mirror set: normal (not mirrored)");
 
-            // Update camera orientation
+            // Step 5: Start the new camera
+            Log.i(TAG, "▶️  Starting new camera...");
+            camera2Helper.startCamera();
+
+            // Step 6: Update camera orientation
             previewView.setCameraOrientation(willBeFront, camera2Helper.getSensorOrientation());
 
-            Log.i(TAG, "Camera flipped to " + (willBeFront ? "front" : "back"));
+            Log.i(TAG, "🎉 Camera flip complete: " + (willBeFront ? "FRONT" : "BACK"));
             return true;
         } catch (Exception e) {
-            Log.e(TAG, "Error flipping camera", e);
+            Log.e(TAG, "❌ Error flipping camera", e);
             return false;
         }
     }
@@ -1795,5 +1827,21 @@ public class NosmaiAgoraBridge {
 
     public Context getContext() {
         return context;
+    }
+
+    /**
+     * Get the internal Agora RtcEngine instance
+     * This allows Flutter to access the engine for rendering remote videos
+     * Critical for multi-live where multiple users need to see each other
+     */
+    public RtcEngine getAgoraEngine() {
+        return agoraEngine;
+    }
+
+    /**
+     * Check if custom camera (Nosmai streaming) is currently active
+     */
+    public boolean isCustomCameraActive() {
+        return isCustomCameraActive;
     }
 }

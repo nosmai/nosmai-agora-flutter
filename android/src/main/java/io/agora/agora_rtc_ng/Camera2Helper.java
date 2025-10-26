@@ -64,6 +64,7 @@ public class Camera2Helper {
     private CameraCharacteristics mCameraCharacteristics;
 
     private boolean mIsCameraOpened = false;
+    private boolean mFirstFrameLogged = false; // Flag for one-time frame arrival log
 
     // Smart buffer reuse for current session
     private byte[] mReuseBuffer = null;
@@ -95,17 +96,26 @@ public class Camera2Helper {
     }
 
     public void startCamera() {
+        Log.i(TAG, "📸 startCamera() called");
+        mFirstFrameLogged = false; // Reset flag for new camera session
         startBackgroundThread();
+        Log.i(TAG, "✅ Background thread started");
         openCamera();
+        Log.i(TAG, "✅ openCamera() initiated (async)");
     }
 
     public void stopCamera() {
         try {
-            if (mFrameCallback != null) {
-                mFrameCallback = null;
-            }
+            // 🎯 CRITICAL FIX: Don't clear mFrameCallback here!
+            // It needs to persist across camera flips so frames continue flowing
+            // The callback will be properly cleared when setFrameCallback(null) is called
+            // or when the camera is permanently released
+
+            // OLD BUG: mFrameCallback = null; ❌ This caused freeze after flip!
+
             closeCamera();
             stopBackgroundThread();
+            Log.i(TAG, "✅ Camera stopped (callback preserved)");
         } catch (Exception e) {
             Log.e(TAG, "Error during camera stop: " + e.getMessage());
         }
@@ -131,44 +141,61 @@ public class Camera2Helper {
 
     @SuppressLint("MissingPermission")
     private void openCamera() {
+        Log.i(TAG, "🔓 openCamera() starting...");
+
         if (ActivityCompat.checkSelfPermission(mContext, Manifest.permission.CAMERA)
                 != PackageManager.PERMISSION_GRANTED) {
             Log.e(TAG, "❌ No camera permission");
             return;
         }
+        Log.i(TAG, "✅ Camera permission granted");
 
         CameraManager manager = (CameraManager) mContext.getSystemService(Context.CAMERA_SERVICE);
         try {
             String cameraId = getCameraId(manager);
             if (cameraId == null) {
+                Log.e(TAG, "❌ Camera ID is null!");
                 return;
             }
+            Log.i(TAG, "✅ Camera ID: " + cameraId);
 
             // Get camera characteristics
             mCameraCharacteristics = manager.getCameraCharacteristics(cameraId);
             StreamConfigurationMap map =
                     mCameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             if (map == null) {
+                Log.e(TAG, "❌ StreamConfigurationMap is null!");
                 return;
             }
 
             // Get sensor orientation
             mSensorOrientation = mCameraCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
             mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class), 1280, 720);
+            Log.i(TAG, "✅ Preview size: " + mPreviewSize.getWidth() + "x" + mPreviewSize.getHeight());
 
             mImageReader = ImageReader.newInstance(
                     mPreviewSize.getWidth(), mPreviewSize.getHeight(),
                     ImageFormat.YUV_420_888, 3);
             mImageReader.setOnImageAvailableListener(mOnImageAvailableListener, mBackgroundHandler);
+            Log.i(TAG, "✅ ImageReader created");
 
+            Log.i(TAG, "🔒 Trying to acquire camera lock...");
             if (!mCameraOpenCloseLock.tryAcquire(2500, TimeUnit.MILLISECONDS)) {
+                Log.e(TAG, "❌ TIMEOUT waiting for camera lock!");
                 throw new RuntimeException("Time out waiting to lock camera opening.");
             }
+            Log.i(TAG, "✅ Camera lock acquired");
 
+            Log.i(TAG, "📸 Opening camera device (async)...");
             manager.openCamera(cameraId, mStateCallback, mBackgroundHandler);
+            Log.i(TAG, "✅ openCamera() call dispatched, waiting for callback...");
 
         } catch (CameraAccessException e) {
+            Log.e(TAG, "❌ CameraAccessException: " + e.getMessage(), e);
         } catch (InterruptedException e) {
+            Log.e(TAG, "❌ InterruptedException: " + e.getMessage(), e);
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Unexpected exception: " + e.getMessage(), e);
         }
     }
 
@@ -214,14 +241,19 @@ public class Camera2Helper {
     private final CameraDevice.StateCallback mStateCallback = new CameraDevice.StateCallback() {
         @Override
         public void onOpened(@NonNull CameraDevice cameraDevice) {
+            Log.i(TAG, "🎉 Camera device OPENED! ID: " + cameraDevice.getId());
             mCameraOpenCloseLock.release();
+            Log.i(TAG, "🔓 Camera lock released");
             mCameraDevice = cameraDevice;
+            Log.i(TAG, "📸 Creating capture session...");
             createCaptureSession();
             mIsCameraOpened = true;
+            Log.i(TAG, "✅ mIsCameraOpened = true");
         }
 
         @Override
         public void onDisconnected(@NonNull CameraDevice cameraDevice) {
+            Log.w(TAG, "⚠️ Camera disconnected! ID: " + cameraDevice.getId());
             mCameraOpenCloseLock.release();
             cameraDevice.close();
             mCameraDevice = null;
@@ -234,6 +266,7 @@ public class Camera2Helper {
 
         @Override
         public void onError(@NonNull CameraDevice cameraDevice, int error) {
+            Log.e(TAG, "❌ Camera ERROR! ID: " + cameraDevice.getId() + ", Error code: " + error);
             mCameraOpenCloseLock.release();
             cameraDevice.close();
             mCameraDevice = null;
@@ -246,30 +279,47 @@ public class Camera2Helper {
     };
 
     private void createCaptureSession() {
+        Log.i(TAG, "🎬 createCaptureSession() called");
         try {
-            if (mCameraDevice == null || mImageReader == null) return;
+            if (mCameraDevice == null) {
+                Log.e(TAG, "❌ mCameraDevice is null!");
+                return;
+            }
+            if (mImageReader == null) {
+                Log.e(TAG, "❌ mImageReader is null!");
+                return;
+            }
+            Log.i(TAG, "✅ Camera device and ImageReader ready");
 
             // Build targets (always include YUV reader, optionally include OES preview surface)
             java.util.ArrayList<Surface> targets = new java.util.ArrayList<>();
             Surface yuvSurface = mImageReader.getSurface();
             targets.add(yuvSurface);
             if (mPreviewSurface != null) targets.add(mPreviewSurface);
+            Log.i(TAG, "✅ Targets created: " + targets.size());
 
             mPreviewRequestBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
             mPreviewRequestBuilder.addTarget(yuvSurface);
             if (mPreviewSurface != null) mPreviewRequestBuilder.addTarget(mPreviewSurface);
+            Log.i(TAG, "✅ Capture request builder created");
 
+            Log.i(TAG, "📸 Creating capture session (async)...");
             mCameraDevice.createCaptureSession(
                     targets, new CameraCaptureSession.StateCallback() {
                         @Override
                         public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {
-                            if (mCameraDevice == null) return;
+                            Log.i(TAG, "🎉 Capture session CONFIGURED!");
+                            if (mCameraDevice == null) {
+                                Log.w(TAG, "⚠️ Camera device null in onConfigured, skipping");
+                                return;
+                            }
 
                             mCaptureSession = cameraCaptureSession;
                             try {
                                 // Get best supported FPS range for optimal performance
                                 Range<Integer> fpsRange = getBestFpsRange();
                                 mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange);
+                                Log.i(TAG, "✅ FPS range set: " + fpsRange);
 
                                 // Set auto-exposure and auto-focus for stability
                                 mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
@@ -278,22 +328,26 @@ public class Camera2Helper {
                                         CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
 
                                 CaptureRequest request = mPreviewRequestBuilder.build();
+                                Log.i(TAG, "📸 Starting repeating request...");
                                 mCaptureSession.setRepeatingRequest(request, null, mBackgroundHandler);
-
+                                Log.i(TAG, "🎉 CAPTURE SESSION ACTIVE! Frames should start flowing...");
 
                             } catch (CameraAccessException e) {
-                                Log.e(TAG, "Failed to set up capture request", e);
+                                Log.e(TAG, "❌ Failed to set up capture request", e);
                             }
                         }
 
                         @Override
                         public void onConfigureFailed(@NonNull CameraCaptureSession cameraCaptureSession) {
-                            Log.e(TAG, "Failed to configure capture session");
+                            Log.e(TAG, "❌ CAPTURE SESSION CONFIGURATION FAILED!");
                         }
                     }, mBackgroundHandler);
+            Log.i(TAG, "✅ createCaptureSession() dispatched, waiting for callback...");
 
         } catch (CameraAccessException e) {
-            Log.e(TAG, "Failed to create capture session", e);
+            Log.e(TAG, "❌ CameraAccessException in createCaptureSession", e);
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Unexpected exception in createCaptureSession", e);
         }
     }
 
@@ -414,11 +468,18 @@ public class Camera2Helper {
                         // 🎯 SAFETY CHECK: Callback must be registered
                         // If null, we're shutting down - close image and return
                         if (mFrameCallback == null) {
+                            Log.w(TAG, "⚠️ Frame received but mFrameCallback is NULL! Dropping frame.");
                             image.close();
                             return;
                         }
 
                         final Image.Plane[] planes = image.getPlanes();
+
+                        // 🎯 Log first frame arrival (one-time per camera open)
+                        if (!mFirstFrameLogged) {
+                            Log.i(TAG, "📸 FIRST FRAME RECEIVED! Size: " + image.getWidth() + "x" + image.getHeight());
+                            mFirstFrameLogged = true;
+                        }
 
                         // Deliver YUV planes to callback
                         mFrameCallback.onFrameAvailable(
@@ -519,6 +580,28 @@ public class Camera2Helper {
                 : CameraCharacteristics.LENS_FACING_FRONT;
         stopCamera();
         startCamera();
+    }
+
+    /**
+     * Set camera facing (front/back)
+     * Use this before calling startCamera() to control which camera opens
+     */
+    public void setFacing(int facing) {
+        mCurrentCameraFacing = facing;
+    }
+
+    /**
+     * Set camera to front facing
+     */
+    public void setFrontFacing() {
+        mCurrentCameraFacing = CameraCharacteristics.LENS_FACING_FRONT;
+    }
+
+    /**
+     * Set camera to back facing
+     */
+    public void setBackFacing() {
+        mCurrentCameraFacing = CameraCharacteristics.LENS_FACING_BACK;
     }
 
     /**
