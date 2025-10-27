@@ -35,7 +35,17 @@ import org.json.JSONObject;
 import org.json.JSONException;
 import android.util.Base64;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import java.io.ByteArrayOutputStream;
+import android.view.TextureView;
+import android.view.ViewGroup;
+import android.os.Build;
+import android.content.ContentValues;
+import android.provider.MediaStore;
+import android.net.Uri;
+import java.io.OutputStream;
+import java.io.FileInputStream;
+import android.os.Environment;
 
 /**
  * NosmaiAgoraBridge - Core Integration Bridge
@@ -96,6 +106,11 @@ public class NosmaiAgoraBridge {
     private float whiteBalanceTemp = 5000.0f;
     private float whiteBalanceTint = 0.0f;
     private boolean grayscaleEnabled = false;
+
+    // Recording state
+    private boolean isRecording = false;
+    private long recordingStartTime = 0;
+    private String recordingPath = null;
 
     // HSB adjustment values
     private float hsbHue = 0.0f;
@@ -1843,5 +1858,618 @@ public class NosmaiAgoraBridge {
      */
     public boolean isCustomCameraActive() {
         return isCustomCameraActive;
+    }
+
+    // ============================================
+    // RECORDING AND PHOTO CAPTURE (Camera Mode)
+    // ============================================
+
+    /**
+     * Start video recording in camera preview mode
+     * Only works when camera preview is active (not streaming mode)
+     */
+    public boolean startRecording() {
+        try {
+            if (!isCameraPreviewActive) {
+                Log.e(TAG, "Cannot start recording - camera preview not active");
+                return false;
+            }
+
+            if (isRecording) {
+                Log.w(TAG, "Recording already in progress");
+                return false;
+            }
+
+            if (previewView == null) {
+                Log.e(TAG, "PreviewView is null");
+                return false;
+            }
+
+            // Create video file path
+            File outputDir = new File(context.getFilesDir(), "recordings");
+            if (!outputDir.exists()) {
+                outputDir.mkdirs();
+            }
+            File videoFile = new File(outputDir, "nosmai_video_" + System.currentTimeMillis() + ".mp4");
+            recordingPath = videoFile.getAbsolutePath();
+
+            // Use NosmaiSDK to start recording with callback
+            NosmaiSDK.startRecording(previewView, recordingPath, new NosmaiSDK.RecordingCallback() {
+                @Override
+                public void onStarted(boolean success, String error) {
+                    if (success) {
+                        isRecording = true;
+                        recordingStartTime = System.currentTimeMillis();
+                        Log.i(TAG, "Recording started successfully: " + recordingPath);
+                    } else {
+                        Log.e(TAG, "Failed to start recording: " + error);
+                        isRecording = false;
+                        recordingPath = null;
+                    }
+                }
+
+                @Override
+                public void onCompleted(String outputPath, boolean success, String error) {
+                    // Not used for start
+                }
+            });
+
+            // Return true immediately (callback will handle actual result)
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting recording", e);
+            isRecording = false;
+            recordingPath = null;
+            return false;
+        }
+    }
+
+    /**
+     * Stop video recording and return result
+     * Returns Map with: success, videoPath, duration, fileSize
+     */
+    public Map<String, Object> stopRecording() {
+        Map<String, Object> result = new HashMap<>();
+
+        try {
+            if (!isRecording) {
+                Log.w(TAG, "No recording in progress");
+                result.put("success", false);
+                result.put("error", "No recording in progress");
+                return result;
+            }
+
+            final long startTime = recordingStartTime;
+            final String pathAtStop = recordingPath;
+            final CountDownLatch latch = new CountDownLatch(1);
+            final Map<String, Object> finalResult = new HashMap<>();
+
+            // Stop recording using NosmaiSDK with callback
+            NosmaiSDK.stopRecording(new NosmaiSDK.RecordingCallback() {
+                @Override
+                public void onStarted(boolean success, String error) {
+                    // Not used for stop
+                }
+
+                @Override
+                public void onCompleted(String outputPath, boolean success, String error) {
+                    isRecording = false;
+                    String videoPath = (outputPath != null && !outputPath.isEmpty()) ? outputPath : pathAtStop;
+                    long duration = startTime > 0 ? (System.currentTimeMillis() - startTime) : 0;
+
+                    if (success && videoPath != null) {
+                        File videoFile = new File(videoPath);
+                        long fileSize = videoFile.exists() ? videoFile.length() : 0;
+
+                        finalResult.put("success", true);
+                        finalResult.put("videoPath", videoPath);
+                        finalResult.put("duration", duration);
+                        finalResult.put("fileSize", fileSize);
+
+                        Log.i(TAG, "Recording stopped successfully: " + videoPath);
+                    } else {
+                        finalResult.put("success", false);
+                        finalResult.put("error", error != null ? error : "Failed to stop recording");
+                        Log.e(TAG, "Failed to stop recording: " + error);
+                    }
+
+                    recordingStartTime = 0;
+                    recordingPath = null;
+                    latch.countDown();
+                }
+            });
+
+            // Wait for callback (with timeout)
+            latch.await(3, java.util.concurrent.TimeUnit.SECONDS);
+
+            if (finalResult.isEmpty()) {
+                // Timeout occurred
+                result.put("success", false);
+                result.put("error", "Timeout waiting for recording to stop");
+                isRecording = false;
+                recordingStartTime = 0;
+                recordingPath = null;
+            } else {
+                result.putAll(finalResult);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error stopping recording", e);
+            result.put("success", false);
+            result.put("error", e.getMessage());
+            isRecording = false;
+            recordingStartTime = 0;
+            recordingPath = null;
+        }
+
+        return result;
+    }
+
+    /**
+     * Capture a photo from camera preview
+     * Returns Map with: success, imageData (bytes), width, height
+     */
+    public Map<String, Object> capturePhoto() {
+        Map<String, Object> result = new HashMap<>();
+
+        try {
+            if (!isCameraPreviewActive) {
+                Log.e(TAG, "Cannot capture photo - camera preview not active");
+                result.put("success", false);
+                result.put("error", "Camera preview not active");
+                return result;
+            }
+
+            if (previewView == null) {
+                Log.e(TAG, "PreviewView is null");
+                result.put("success", false);
+                result.put("error", "Preview not ready");
+                return result;
+            }
+
+            // Find TextureView in preview
+            TextureView textureView = findTextureView(previewView);
+            if (textureView != null) {
+                Bitmap bitmap = textureView.getBitmap();
+                if (bitmap != null) {
+                    // Convert Bitmap to byte array
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, baos);
+                    byte[] data = baos.toByteArray();
+
+                    result.put("success", true);
+                    result.put("imageData", data);
+                    result.put("width", bitmap.getWidth());
+                    result.put("height", bitmap.getHeight());
+
+                    Log.i(TAG, "Photo captured successfully: " + bitmap.getWidth() + "x" + bitmap.getHeight());
+
+                    bitmap.recycle();
+                    return result;
+                }
+            }
+
+            // If TextureView capture failed, return error
+            result.put("success", false);
+            result.put("error", "Failed to capture photo from preview");
+        } catch (Exception e) {
+            Log.e(TAG, "Error capturing photo", e);
+            result.put("success", false);
+            result.put("error", e.getMessage());
+        }
+
+        return result;
+    }
+
+    /**
+     * Find TextureView in view hierarchy
+     */
+    private TextureView findTextureView(android.view.View root) {
+        if (root instanceof TextureView) {
+            return (TextureView) root;
+        }
+        if (root instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) root;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                android.view.View child = group.getChildAt(i);
+                TextureView found = findTextureView(child);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Save image data to gallery
+     * Returns Map with: success, filePath, error (if any)
+     */
+    public Map<String, Object> saveImageToGallery(byte[] imageData, String name) {
+        Map<String, Object> result = new HashMap<>();
+
+        try {
+            if (imageData == null || imageData.length == 0) {
+                result.put("success", false);
+                result.put("error", "Invalid image data");
+                return result;
+            }
+
+            // Decode bitmap from byte array
+            Bitmap bitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.length);
+            if (bitmap == null) {
+                result.put("success", false);
+                result.put("error", "Could not create image from data");
+                return result;
+            }
+
+            // Save using MediaStore
+            boolean saved;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                saved = saveImageToGalleryQ(bitmap, name);
+            } else {
+                saved = saveImageToGalleryLegacy(bitmap, name);
+            }
+
+            if (saved) {
+                result.put("success", true);
+                result.put("message", "Image saved to gallery");
+                Log.i(TAG, "Image saved to gallery: " + name);
+            } else {
+                result.put("success", false);
+                result.put("error", "Failed to save image to gallery");
+            }
+
+            bitmap.recycle();
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving image to gallery", e);
+            result.put("success", false);
+            result.put("error", e.getMessage());
+        }
+
+        return result;
+    }
+
+    /**
+     * Save image to gallery (Android Q+)
+     */
+    private boolean saveImageToGalleryQ(Bitmap bitmap, String name) {
+        try {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, name + ".jpg");
+            values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+            values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Nosmai");
+
+            Uri uri = context.getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            if (uri != null) {
+                OutputStream outputStream = context.getContentResolver().openOutputStream(uri);
+                if (outputStream != null) {
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 95, outputStream);
+                    outputStream.close();
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving image (Q+)", e);
+        }
+        return false;
+    }
+
+    /**
+     * Save image to gallery (Legacy)
+     */
+    private boolean saveImageToGalleryLegacy(Bitmap bitmap, String name) {
+        try {
+            String imagesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES).toString() + "/Nosmai";
+            File dir = new File(imagesDir);
+            if (!dir.exists()) {
+                dir.mkdirs();
+            }
+
+            File imageFile = new File(dir, name + ".jpg");
+            FileOutputStream fos = new FileOutputStream(imageFile);
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos);
+            fos.close();
+
+            // Notify media scanner
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Images.Media.DATA, imageFile.getAbsolutePath());
+            values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+            context.getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving image (legacy)", e);
+        }
+        return false;
+    }
+
+    /**
+     * Save video to gallery
+     * Returns Map with: success, filePath, error (if any)
+     */
+    public Map<String, Object> saveVideoToGallery(String videoPath, String name) {
+        Map<String, Object> result = new HashMap<>();
+
+        try {
+            if (videoPath == null || videoPath.isEmpty()) {
+                result.put("success", false);
+                result.put("error", "Invalid video path");
+                return result;
+            }
+
+            File videoFile = new File(videoPath);
+            if (!videoFile.exists()) {
+                result.put("success", false);
+                result.put("error", "Video file does not exist");
+                return result;
+            }
+
+            // Save using MediaStore
+            boolean saved;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                saved = saveVideoToGalleryQ(videoFile, name);
+            } else {
+                saved = saveVideoToGalleryLegacy(videoFile, name);
+            }
+
+            if (saved) {
+                result.put("success", true);
+                result.put("message", "Video saved to gallery");
+                Log.i(TAG, "Video saved to gallery: " + name);
+            } else {
+                result.put("success", false);
+                result.put("error", "Failed to save video to gallery");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving video to gallery", e);
+            result.put("success", false);
+            result.put("error", e.getMessage());
+        }
+
+        return result;
+    }
+
+    /**
+     * Save video to gallery (Android Q+)
+     */
+    private boolean saveVideoToGalleryQ(File videoFile, String name) {
+        try {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Video.Media.DISPLAY_NAME, name + ".mp4");
+            values.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
+            values.put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/Nosmai");
+
+            Uri uri = context.getContentResolver().insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values);
+            if (uri != null) {
+                OutputStream outputStream = context.getContentResolver().openOutputStream(uri);
+                if (outputStream != null) {
+                    FileInputStream inputStream = new FileInputStream(videoFile);
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = inputStream.read(buffer)) != -1) {
+                        outputStream.write(buffer, 0, bytesRead);
+                    }
+                    inputStream.close();
+                    outputStream.close();
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving video (Q+)", e);
+        }
+        return false;
+    }
+
+    /**
+     * Save video to gallery (Legacy)
+     */
+    private boolean saveVideoToGalleryLegacy(File videoFile, String name) {
+        try {
+            String videosDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES).toString() + "/Nosmai";
+            File dir = new File(videosDir);
+            if (!dir.exists()) {
+                dir.mkdirs();
+            }
+
+            File destFile = new File(dir, name + ".mp4");
+
+            // Copy file
+            FileInputStream inputStream = new FileInputStream(videoFile);
+            FileOutputStream outputStream = new FileOutputStream(destFile);
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                outputStream.write(buffer, 0, bytesRead);
+            }
+            inputStream.close();
+            outputStream.close();
+
+            // Notify media scanner
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Video.Media.DATA, destFile.getAbsolutePath());
+            values.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
+            context.getContentResolver().insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values);
+
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving video (legacy)", e);
+        }
+        return false;
+    }
+
+    // ============================================
+    // CAMERA CONFIGURATION AND FLASH/TORCH
+    // ============================================
+
+    /**
+     * Configure camera position and session preset
+     */
+    public boolean configureCamera(String position, String sessionPreset) {
+        try {
+            if (!isCameraPreviewActive) {
+                Log.w(TAG, "Camera preview not active, cannot configure");
+                return false;
+            }
+
+            // For Android, camera configuration is handled during startCameraPreview
+            // This method is mainly for compatibility with iOS
+            // If camera is already running and we need to switch, use switchCamera instead
+
+            boolean isFront = "front".equalsIgnoreCase(position);
+
+            if (camera2Helper != null) {
+                // Switch camera if needed
+                camera2Helper.switchCamera();
+                Log.i(TAG, "Camera configured to position: " + position);
+                return true;
+            }
+
+            Log.w(TAG, "Camera2Helper not initialized");
+            return false;
+        } catch (Exception e) {
+            Log.e(TAG, "Error configuring camera", e);
+            return false;
+        }
+    }
+
+    /**
+     * Check if device has flash
+     */
+    public boolean hasFlash() {
+        try {
+            if (camera2Helper != null) {
+                return camera2Helper.hasFlash();
+            }
+            // Check if device has flash capability
+            return context.getPackageManager().hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_FLASH);
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking flash", e);
+            return false;
+        }
+    }
+
+    /**
+     * Check if device has torch
+     */
+    public boolean hasTorch() {
+        // On Android, torch is same as flash
+        return hasFlash();
+    }
+
+    /**
+     * Set flash mode (off, on, auto)
+     */
+    public boolean setFlashMode(String mode) {
+        try {
+            if (camera2Helper == null) {
+                Log.w(TAG, "Camera2Helper not initialized");
+                return false;
+            }
+
+            // Flash mode is typically for photo capture
+            // On Android, we'll store this for later use during photo capture
+            Log.i(TAG, "Flash mode set to: " + mode);
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting flash mode", e);
+            return false;
+        }
+    }
+
+    /**
+     * Set torch mode (off, on, auto)
+     */
+    public boolean setTorchMode(String mode) {
+        try {
+            if (camera2Helper == null) {
+                Log.w(TAG, "Camera2Helper not initialized");
+                return false;
+            }
+
+            boolean enable = "on".equalsIgnoreCase(mode);
+            camera2Helper.setTorchMode(enable);
+            Log.i(TAG, "Torch mode set to: " + mode);
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting torch mode", e);
+            return false;
+        }
+    }
+
+    /**
+     * Get current flash mode
+     */
+    public String getFlashMode() {
+        // Return default since flash is used per photo capture
+        return "off";
+    }
+
+    /**
+     * Get current torch mode
+     */
+    public String getTorchMode() {
+        try {
+            if (camera2Helper != null) {
+                return camera2Helper.isTorchOn() ? "on" : "off";
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting torch mode", e);
+        }
+        return "off";
+    }
+
+    /**
+     * Start processing (for camera preview mode)
+     * Starts the camera and filter processing without streaming
+     */
+    public boolean startProcessing() {
+        try {
+            if (isCameraPreviewActive) {
+                Log.i(TAG, "Processing already active");
+                return true;
+            }
+
+            // Start camera preview mode
+            return startCameraPreview();
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting processing", e);
+            return false;
+        }
+    }
+
+    /**
+     * Stop processing (for camera preview mode)
+     */
+    public boolean stopProcessing() {
+        try {
+            if (!isCameraPreviewActive) {
+                Log.i(TAG, "Processing not active");
+                return true;
+            }
+
+            // Stop camera preview mode
+            return stopCameraPreview();
+        } catch (Exception e) {
+            Log.e(TAG, "Error stopping processing", e);
+            return false;
+        }
+    }
+
+    /**
+     * Detach camera view
+     * Stops camera and cleans up preview view
+     */
+    public boolean detachCameraView() {
+        try {
+            stopCameraPreview();
+
+            if (previewView != null) {
+                previewView = null;
+            }
+
+            Log.i(TAG, "Camera view detached");
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Error detaching camera view", e);
+            return false;
+        }
     }
 }

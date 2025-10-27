@@ -181,10 +181,31 @@ class _NosmaiCameraPreviewState extends State<NosmaiCameraPreview> {
   @override
   Widget build(BuildContext context) {
     if (defaultTargetPlatform == TargetPlatform.android) {
-      return const AndroidView(
-        viewType: 'nosmai_native_camera',
+      // Android: Use proper aspect ratio handling
+      const aspectRatio = 9.0 / 16.0;
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final resolvedSize = _resolveAndroidPreviewSize(context, constraints, aspectRatio);
+
+          return Align(
+            alignment: Alignment.center,
+            child: SizedBox(
+              width: resolvedSize.width,
+              height: resolvedSize.height,
+              child: ClipRect(
+                child: const RepaintBoundary(
+                  child: AndroidView(
+                    viewType: 'nosmai_native_camera',
+                    layoutDirection: TextDirection.ltr,
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
       );
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+      // iOS: Keep original implementation (untouched)
       return const UiKitView(
         viewType: 'nosmai_native_camera',
       );
@@ -193,5 +214,35 @@ class _NosmaiCameraPreviewState extends State<NosmaiCameraPreview> {
         child: Text('Platform not supported'),
       );
     }
+  }
+
+  /// Calculate proper Android preview size with aspect ratio
+  Size _resolveAndroidPreviewSize(
+    BuildContext context,
+    BoxConstraints constraints,
+    double aspectRatio,
+  ) {
+    final mediaSize = MediaQuery.of(context).size;
+
+    double maxWidth = constraints.maxWidth;
+    if (!maxWidth.isFinite || maxWidth <= 0) {
+      maxWidth = mediaSize.width;
+    }
+
+    double maxHeight = constraints.maxHeight;
+    if (!maxHeight.isFinite || maxHeight <= 0) {
+      maxHeight = mediaSize.height;
+    }
+
+    // Calculate size maintaining aspect ratio
+    double width = maxWidth;
+    double height = width / aspectRatio;
+
+    if (height > maxHeight) {
+      height = maxHeight;
+      width = height * aspectRatio;
+    }
+
+    return Size(width, height);
   }
 }

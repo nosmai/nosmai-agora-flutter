@@ -8,7 +8,7 @@ import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
 import android.util.Log;
-
+import com.nosmai.effect.api.NosmaiSDK;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.List;
@@ -400,6 +400,117 @@ public class NosmaiAgoraPlugin implements FlutterPlugin, MethodCallHandler {
         else if ("getFlutterEngineInfo".equals(call.method)) {
             String info = bridge.getFlutterEngineInfo();
             result.success(info);
+        }
+
+        // ============================================
+        // RECORDING AND PHOTO CAPTURE (Camera Mode)
+        // ============================================
+
+        else if ("startRecording".equals(call.method)) {
+            boolean success = bridge.startRecording();
+            result.success(success);
+        }
+
+        else if ("stopRecording".equals(call.method)) {
+            Map<String, Object> recordingResult = bridge.stopRecording();
+            result.success(recordingResult);
+        }
+
+        else if ("capturePhoto".equals(call.method)) {
+            Map<String, Object> photoResult = bridge.capturePhoto();
+            result.success(photoResult);
+        }
+
+        else if ("saveImageToGallery".equals(call.method)) {
+            // Get image data as byte array
+            byte[] imageData = call.argument("imageData");
+            String name = call.argument("name");
+
+            if (imageData != null && name != null) {
+                Map<String, Object> saveResult = bridge.saveImageToGallery(imageData, name);
+                result.success(saveResult);
+            } else {
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("success", false);
+                errorResult.put("error", "Missing imageData or name parameter");
+                result.success(errorResult);
+            }
+        }
+
+        else if ("saveVideoToGallery".equals(call.method)) {
+            String videoPath = call.argument("videoPath");
+            String name = call.argument("name");
+
+            if (videoPath != null && name != null) {
+                Map<String, Object> saveResult = bridge.saveVideoToGallery(videoPath, name);
+                result.success(saveResult);
+            } else {
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("success", false);
+                errorResult.put("error", "Missing videoPath or name parameter");
+                result.success(errorResult);
+            }
+        }
+
+        // ============================================
+        // CAMERA CONFIGURATION AND FLASH/TORCH
+        // ============================================
+
+        else if ("configureCamera".equals(call.method)) {
+            String position = call.argument("position");
+            String sessionPreset = call.argument("sessionPreset");
+            boolean success = bridge.configureCamera(
+                position != null ? position : "front",
+                sessionPreset != null ? sessionPreset : "high"
+            );
+            result.success(success);
+        }
+
+        else if ("hasFlash".equals(call.method)) {
+            boolean hasFlash = bridge.hasFlash();
+            result.success(hasFlash);
+        }
+
+        else if ("hasTorch".equals(call.method)) {
+            boolean hasTorch = bridge.hasTorch();
+            result.success(hasTorch);
+        }
+
+        else if ("setFlashMode".equals(call.method)) {
+            String mode = call.argument("mode");
+            boolean success = bridge.setFlashMode(mode != null ? mode : "off");
+            result.success(success);
+        }
+
+        else if ("setTorchMode".equals(call.method)) {
+            String mode = call.argument("mode");
+            boolean success = bridge.setTorchMode(mode != null ? mode : "off");
+            result.success(success);
+        }
+
+        else if ("getFlashMode".equals(call.method)) {
+            String mode = bridge.getFlashMode();
+            result.success(mode);
+        }
+
+        else if ("getTorchMode".equals(call.method)) {
+            String mode = bridge.getTorchMode();
+            result.success(mode);
+        }
+
+        else if ("startProcessing".equals(call.method)) {
+            boolean success = bridge.startProcessing();
+            result.success(success);
+        }
+
+        else if ("stopProcessing".equals(call.method)) {
+            boolean success = bridge.stopProcessing();
+            result.success(success);
+        }
+
+        else if ("detachCameraView".equals(call.method)) {
+            boolean success = bridge.detachCameraView();
+            result.success(success);
         }
 
         // ============================================

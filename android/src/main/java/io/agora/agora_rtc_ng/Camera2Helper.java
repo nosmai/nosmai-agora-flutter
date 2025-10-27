@@ -650,4 +650,65 @@ public class Camera2Helper {
             return new Range<>(15, 30);
         }
     }
+
+    /**
+     * Check if current camera has flash capability
+     */
+    public boolean hasFlash() {
+        try {
+            if (mCameraCharacteristics != null) {
+                Boolean flashAvailable = mCameraCharacteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                return flashAvailable != null && flashAvailable;
+            }
+
+            // Fallback: check using camera manager
+            CameraManager manager = (CameraManager) mContext.getSystemService(Context.CAMERA_SERVICE);
+            if (manager != null) {
+                String cameraId = getCameraId(mCurrentCameraFacing);
+                if (cameraId != null) {
+                    CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId);
+                    Boolean flashAvailable = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                    return flashAvailable != null && flashAvailable;
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking flash availability", e);
+        }
+        return false;
+    }
+
+    /**
+     * Set torch mode (on/off)
+     */
+    public void setTorchMode(boolean enabled) {
+        setFlashEnabled(enabled);
+    }
+
+    /**
+     * Check if torch is currently on
+     */
+    public boolean isTorchOn() {
+        return mFlashEnabled;
+    }
+
+    /**
+     * Get camera ID for specific facing
+     */
+    private String getCameraId(int facing) {
+        try {
+            CameraManager manager = (CameraManager) mContext.getSystemService(Context.CAMERA_SERVICE);
+            if (manager != null) {
+                for (String cameraId : manager.getCameraIdList()) {
+                    CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId);
+                    Integer cameraFacing = characteristics.get(CameraCharacteristics.LENS_FACING);
+                    if (cameraFacing != null && cameraFacing == facing) {
+                        return cameraId;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting camera ID", e);
+        }
+        return null;
+    }
 }
