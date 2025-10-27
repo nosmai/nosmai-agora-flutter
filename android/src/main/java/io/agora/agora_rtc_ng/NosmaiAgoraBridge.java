@@ -25,12 +25,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.concurrent.CountDownLatch;
+import io.flutter.plugin.common.MethodChannel.Result;
 import org.json.JSONObject;
 import org.json.JSONException;
 import android.util.Base64;
@@ -1925,24 +1927,24 @@ public class NosmaiAgoraBridge {
     }
 
     /**
-     * Stop video recording and return result
+     * Stop video recording and return result asynchronously via callback
      * Returns Map with: success, videoPath, duration, fileSize
      */
-    public Map<String, Object> stopRecording() {
-        Map<String, Object> result = new HashMap<>();
-
+    public void stopRecording(final Result flutterResult) {
         try {
             if (!isRecording) {
                 Log.w(TAG, "No recording in progress");
-                result.put("success", false);
-                result.put("error", "No recording in progress");
-                return result;
+                Map<String, Object> errorResult = new HashMap<>();
+                errorResult.put("success", false);
+                errorResult.put("error", "No recording in progress");
+                flutterResult.success(errorResult);
+                return;
             }
 
             final long startTime = recordingStartTime;
             final String pathAtStop = recordingPath;
-            final CountDownLatch latch = new CountDownLatch(1);
-            final Map<String, Object> finalResult = new HashMap<>();
+
+            Log.i(TAG, "🎬 Stopping recording...");
 
             // Stop recording using NosmaiSDK with callback
             NosmaiSDK.stopRecording(new NosmaiSDK.RecordingCallback() {
@@ -1953,55 +1955,50 @@ public class NosmaiAgoraBridge {
 
                 @Override
                 public void onCompleted(String outputPath, boolean success, String error) {
+                    Log.i(TAG, "🎬 Recording callback received - success: " + success + ", path: " + outputPath);
+
                     isRecording = false;
                     String videoPath = (outputPath != null && !outputPath.isEmpty()) ? outputPath : pathAtStop;
                     long duration = startTime > 0 ? (System.currentTimeMillis() - startTime) : 0;
+
+                    Map<String, Object> resultMap = new HashMap<>();
 
                     if (success && videoPath != null) {
                         File videoFile = new File(videoPath);
                         long fileSize = videoFile.exists() ? videoFile.length() : 0;
 
-                        finalResult.put("success", true);
-                        finalResult.put("videoPath", videoPath);
-                        finalResult.put("duration", duration);
-                        finalResult.put("fileSize", fileSize);
+                        resultMap.put("success", true);
+                        resultMap.put("videoPath", videoPath);
+                        resultMap.put("duration", duration);
+                        resultMap.put("fileSize", fileSize);
 
-                        Log.i(TAG, "Recording stopped successfully: " + videoPath);
+                        Log.i(TAG, "✅ Recording stopped successfully: " + videoPath);
+                        Log.i(TAG, "📦 Result map: " + resultMap.toString());
                     } else {
-                        finalResult.put("success", false);
-                        finalResult.put("error", error != null ? error : "Failed to stop recording");
-                        Log.e(TAG, "Failed to stop recording: " + error);
+                        resultMap.put("success", false);
+                        resultMap.put("error", error != null ? error : "Failed to stop recording");
+                        Log.e(TAG, "❌ Failed to stop recording: " + error);
                     }
 
                     recordingStartTime = 0;
                     recordingPath = null;
-                    latch.countDown();
+
+                    // Return result to Flutter asynchronously from callback
+                    Log.i(TAG, "🎯 Returning result to Flutter: " + resultMap.toString());
+                    flutterResult.success(resultMap);
                 }
             });
 
-            // Wait for callback (with timeout)
-            latch.await(3, java.util.concurrent.TimeUnit.SECONDS);
-
-            if (finalResult.isEmpty()) {
-                // Timeout occurred
-                result.put("success", false);
-                result.put("error", "Timeout waiting for recording to stop");
-                isRecording = false;
-                recordingStartTime = 0;
-                recordingPath = null;
-            } else {
-                result.putAll(finalResult);
-            }
         } catch (Exception e) {
-            Log.e(TAG, "Error stopping recording", e);
-            result.put("success", false);
-            result.put("error", e.getMessage());
+            Log.e(TAG, "❌ Exception in stopRecording", e);
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("success", false);
+            errorResult.put("error", e.getMessage());
             isRecording = false;
             recordingStartTime = 0;
             recordingPath = null;
+            flutterResult.success(errorResult);
         }
-
-        return result;
     }
 
     /**

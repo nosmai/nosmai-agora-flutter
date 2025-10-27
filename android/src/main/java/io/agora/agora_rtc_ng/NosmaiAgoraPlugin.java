@@ -412,8 +412,8 @@ public class NosmaiAgoraPlugin implements FlutterPlugin, MethodCallHandler {
         }
 
         else if ("stopRecording".equals(call.method)) {
-            Map<String, Object> recordingResult = bridge.stopRecording();
-            result.success(recordingResult);
+            // Pass Result object to bridge - it will return asynchronously from callback
+            bridge.stopRecording(result);
         }
 
         else if ("capturePhoto".equals(call.method)) {
