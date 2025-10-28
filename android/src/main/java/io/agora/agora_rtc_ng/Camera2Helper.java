@@ -441,7 +441,7 @@ public class Camera2Helper {
                         mFrameCallback.onFrameAvailable(
                                 planes[0].getBuffer(),
                                 planes[1].getBuffer(),
-                                planes[2].getBuffer(),x
+                                planes[2].getBuffer(),
                                 image.getWidth(),
                                 image.getHeight(),
                                 planes[0].getRowStride(),
