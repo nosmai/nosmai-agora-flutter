@@ -48,6 +48,7 @@ import android.net.Uri;
 import java.io.OutputStream;
 import java.io.FileInputStream;
 import android.os.Environment;
+import androidx.annotation.Nullable;
 
 /**
  * NosmaiAgoraBridge - Core Integration Bridge
@@ -119,22 +120,8 @@ public class NosmaiAgoraBridge {
     private float hsbSaturation = 0.0f;
     private float hsbBrightness = 0.0f;
 
-    // 🚀 Performance: Frame object pooling
-    // Reuse AgoraVideoFrame objects instead of creating new ones every frame
-    // This reduces GC pressure and improves frame processing performance by ~40-50%
     private final Queue<AgoraVideoFrame> framePool = new ConcurrentLinkedQueue<>();
     private static final int MAX_POOL_SIZE = 5;
-
-    // ❌ REMOVED: Debouncing caused filter batching issues with manual apply pattern
-    // When user applied multiple filters sequentially, they would queue and execute together
-    // causing performance crashes. Flutter already has manual apply button, so no need for debouncing.
-    // private final Handler filterHandler = new Handler(Looper.getMainLooper());
-    // private static final long FILTER_DEBOUNCE_DELAY_MS = 50;
-    // private final Map<String, Runnable> pendingFilterUpdates = new HashMap<>();
-
-    // ============================================
-    // SINGLETON
-    // ============================================
 
     public static synchronized NosmaiAgoraBridge getInstance(Context context) {
         if (instance == null) {
@@ -230,13 +217,9 @@ public class NosmaiAgoraBridge {
     public boolean releaseAgora() {
         try {
             if (agoraEngine != null) {
-                // 🎯 CRITICAL FIX: Wait for async operations to complete
-                // leaveChannel() is async and continues in background
-                // Frame callbacks need time to finish
-                // This prevents SIGSEGV crash when trying to access freed engine
                 try {
                     Log.i(TAG, "Waiting for async operations to complete...");
-                    Thread.sleep(800);  // Wait 800ms for leaveChannel + frame callbacks
+                    Thread.sleep(800);  
                     Log.i(TAG, "Wait complete, destroying engine");
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -315,12 +298,15 @@ public class NosmaiAgoraBridge {
                 return false;
             }
 
-            // Create preview view
-            previewView = new NosmaiPreviewView(context);
+            // 🎯 Get fresh preview view (requirePreviewView always creates new)
+            // Platform View Factory may also create and set its own view later
+            previewView = requirePreviewView(context);
+            Log.i(TAG, "Using fresh preview view for streaming");
 
             // Try to start processing - if SDK state was lost, re-initialize
             try {
                 NosmaiSDK.startProcessing(previewView);
+                Log.i(TAG, "Nosmai processing started successfully");
             } catch (IllegalStateException e) {
                 // SDK state was cleared by stopProcessing() - re-initialize
                 Log.w(TAG, "⚠️ SDK state lost, re-initializing...");
@@ -367,7 +353,7 @@ public class NosmaiAgoraBridge {
             return true;
 
         } catch (Exception e) {
-            Log.e(TAG, "❌ Failed to start custom camera", e);
+            Log.e(TAG, "Failed to start custom camera", e);
             return false;
         }
     }
@@ -391,12 +377,14 @@ public class NosmaiAgoraBridge {
             NosmaiSDK.setMirrorX(true); // Mirror for front camera
             NosmaiSDK.setCameraFacing(true); // Front camera
 
-            // Setup frame callback - this is where Camera2 delivers YUV frames
             camera2Helper.setFrameCallback((y, u, v, width, height,
                                            yStride, uStride, vStride,
                                            uPixelStride, vPixelStride) -> {
                 try {
-                    // Calculate rotation based on sensor orientation
+                    if (previewView == null) {
+                        return; 
+                    }
+
                     int rotation = calculateRotation(
                             camera2Helper.isFrontCamera(),
                             camera2Helper.getSensorOrientation()
@@ -411,8 +399,10 @@ public class NosmaiAgoraBridge {
                             rotation
                     );
 
-                    // Request render update
-                    previewView.requestRenderUpdate();
+                    // Request render update (with null check for safety)
+                    if (previewView != null) {
+                        previewView.requestRenderUpdate();
+                    }
 
                 } catch (Exception e) {
                     Log.e(TAG, "Error processing frame", e);
@@ -427,7 +417,7 @@ public class NosmaiAgoraBridge {
                     camera2Helper.getPreviewHeight());
 
         } catch (Exception e) {
-            Log.e(TAG, "❌ Failed to setup camera capture", e);
+            Log.e(TAG, " Failed to setup camera capture", e);
         }
     }
 
@@ -436,11 +426,6 @@ public class NosmaiAgoraBridge {
      * Based on sensor orientation and camera facing
      */
     private int calculateRotation(boolean isFrontCamera, int sensorOrientation) {
-        // Rotation constants:
-        // 0 = NoRotation
-        // 1 = RotateLeft (90° CCW)
-        // 2 = RotateRight (90° CW)
-
         if (isFrontCamera) {
             // Front camera: 270° sensor → RotateRight
             return (sensorOrientation == 90) ? 2 : 1;
@@ -530,25 +515,17 @@ public class NosmaiAgoraBridge {
             // Clear frame callback
             NosmaiSDK.setFrameCallback(null);
 
-            // 🚀 Clear frame pool to free memory
             clearFramePool();
 
-            // ❌ No longer needed - debouncing removed
-            // clearPendingFilterUpdates();
-
-            // Stop camera capture
             if (camera2Helper != null) {
                 camera2Helper.stopCamera();
-                // 🎯 CRITICAL: Clear frame callback to prevent memory leaks
                 camera2Helper.setFrameCallback(null);
                 camera2Helper = null;
                 Log.i(TAG, "Camera2Helper stopped and callback cleared");
             }
 
-            // Stop Nosmai processing
             NosmaiSDK.stopProcessing();
-
-            // Leave channel (this is async!)
+            Log.i(TAG, "Nosmai processing stopped");
             if (channelJoined && agoraEngine != null) {
                 agoraEngine.leaveChannel();
                 Log.i(TAG, "Left channel (async)");
@@ -597,14 +574,11 @@ public class NosmaiAgoraBridge {
                 return false;
             }
 
-            // Create preview view
-            previewView = new NosmaiPreviewView(context);
+            previewView = requirePreviewView(context);
 
-            // Try to start processing - if SDK state was lost, re-initialize
             try {
                 NosmaiSDK.startProcessing(previewView);
             } catch (IllegalStateException e) {
-                // SDK state was cleared by stopProcessing() - re-initialize
                 Log.w(TAG, "⚠️ SDK state lost, re-initializing...");
                 nosmaiInitialized = false;
                 NosmaiSDK.initialize(context, storedLicenseKey);
@@ -613,11 +587,9 @@ public class NosmaiAgoraBridge {
                 Log.i(TAG, "SDK re-initialized successfully");
             }
 
-            // Set PREVIEW_ONLY mode (no streaming output)
             NosmaiSDK.setRenderMode(NosmaiSDK.RenderMode.PREVIEW_ONLY);
             Log.i(TAG, "Nosmai processing started (PREVIEW_ONLY mode)");
 
-            // Setup camera with Camera2Helper
             setupCameraCapture();
 
             isCameraPreviewActive = true;
@@ -625,7 +597,7 @@ public class NosmaiAgoraBridge {
             return true;
 
         } catch (Exception e) {
-            Log.e(TAG, "❌ Failed to start camera preview", e);
+            Log.e(TAG, "Failed to start camera preview", e);
             return false;
         }
     }
@@ -644,7 +616,6 @@ public class NosmaiAgoraBridge {
             // Stop camera capture
             if (camera2Helper != null) {
                 camera2Helper.stopCamera();
-                // 🎯 CRITICAL: Clear frame callback to prevent memory leaks
                 camera2Helper.setFrameCallback(null);
                 camera2Helper = null;
                 Log.i(TAG, "Camera2Helper stopped and callback cleared");
@@ -777,52 +748,28 @@ public class NosmaiAgoraBridge {
         }
 
         try {
-            // 🎯 CRITICAL FIX: Proper sequence to prevent mirror glitch and freeze
-            Log.i(TAG, "🔄 Starting camera flip sequence...");
-
-            // Step 1: Calculate next camera state BEFORE stopping
             boolean currentlyFront = camera2Helper.isFrontCamera();
             boolean willBeFront = !currentlyFront;
-            Log.i(TAG, "📸 Current: " + (currentlyFront ? "front" : "back") + " → Next: " + (willBeFront ? "front" : "back"));
-
-            // Step 2: Stop current camera completely (synchronous)
-            // This ensures no frames are processed during transition
-            Log.i(TAG, "⏸️  Stopping current camera...");
             camera2Helper.stopCamera();
-            Log.i(TAG, "✅ Current camera stopped");
 
-            // Step 3: Set camera facing for next camera
-            // This must be done BEFORE setting mirror to ensure correct association
             if (willBeFront) {
                 camera2Helper.setFrontFacing();
             } else {
                 camera2Helper.setBackFacing();
             }
-            Log.i(TAG, "✅ Camera facing updated to " + (willBeFront ? "front" : "back"));
 
             // Step 4: Set mirror mode for the NEW camera (no current frames to affect!)
             NosmaiSDK.setMirrorX(willBeFront);
             NosmaiSDK.setCameraFacing(willBeFront);
-            Log.i(TAG, "✅ Local mirror set: " + (willBeFront ? "mirrored (front)" : "normal (back)"));
-
-            // Step 4.5: 🎯 CRITICAL FIX: Update encoder mirror for remote viewers
-            // Both front and back cameras should NOT be mirrored on remote side
-            // Front camera: Broadcaster sees mirrored (selfie), but remote sees you normally
-            // Back camera: Both broadcaster and remote see world normally
             applyEncoderMirror(false);
-            Log.i(TAG, "✅ Remote mirror set: normal (not mirrored)");
 
-            // Step 5: Start the new camera
             Log.i(TAG, "▶️  Starting new camera...");
             camera2Helper.startCamera();
 
-            // Step 6: Update camera orientation
             previewView.setCameraOrientation(willBeFront, camera2Helper.getSensorOrientation());
-
-            Log.i(TAG, "🎉 Camera flip complete: " + (willBeFront ? "FRONT" : "BACK"));
             return true;
         } catch (Exception e) {
-            Log.e(TAG, "❌ Error flipping camera", e);
+            Log.e(TAG, "Error flipping camera", e);
             return false;
         }
     }
@@ -847,15 +794,9 @@ public class NosmaiAgoraBridge {
         try {
             mirrorModeEnabled = enabled;
 
-            // 🎯 NosmaiSDK has INVERTED logic: false = mirror, true = normal
             NosmaiSDK.setMirrorX(enabled);
-
-            // 🎯 Agora encoder has NORMAL logic: true = mirror, false = normal
-            // So we INVERT the boolean to match NosmaiSDK behavior
             applyEncoderMirror(!enabled);
 
-            Log.i(TAG, "Mirror mode " + (enabled ? "enabled" : "disabled") +
-                  " (NosmaiSDK=" + enabled + ", Agora=" + !enabled + ")");
             return true;
         } catch (Exception e) {
             Log.e(TAG, "Error toggling mirror", e);
@@ -1838,7 +1779,35 @@ public class NosmaiAgoraBridge {
     // GETTERS FOR PLATFORM VIEW
     // ============================================
 
-    public NosmaiPreviewView getPreviewView() {
+    public synchronized NosmaiPreviewView requirePreviewView(Context context) {
+        // 🎯 FIX: Create fresh view only if null or disposed
+        // Platform View Factory will update this reference when it creates its view
+        if (previewView == null) {
+            previewView = new NosmaiPreviewView(context);
+            Log.i(TAG, "Created new preview view (will be updated by Platform View)");
+        } else {
+            Log.i(TAG, "Using existing preview view from Platform View");
+        }
+        return previewView;
+    }
+
+    public synchronized void setPreviewView(@Nullable NosmaiPreviewView view) {
+        previewView = view;
+    }
+
+    public synchronized void clearPreviewView(@Nullable NosmaiPreviewView view) {
+        // 🎯 FIX: Allow clearing preview view reference when Platform View disposes
+        // This is safe because:
+        // 1. Platform View dispose happens AFTER stopCustomCamera/stopCameraPreview
+        // 2. We need to clear the reference so next Platform View gets a fresh view
+        // 3. Keeping the old reference causes GL context issues on restart
+        if (previewView == view) {
+            previewView = null;
+            Log.i(TAG, "Preview view reference cleared (was disposed)");
+        }
+    }
+
+    public synchronized NosmaiPreviewView getPreviewView() {
         return previewView;
     }
 
@@ -1972,25 +1941,21 @@ public class NosmaiAgoraBridge {
                         resultMap.put("duration", duration);
                         resultMap.put("fileSize", fileSize);
 
-                        Log.i(TAG, "✅ Recording stopped successfully: " + videoPath);
-                        Log.i(TAG, "📦 Result map: " + resultMap.toString());
                     } else {
                         resultMap.put("success", false);
                         resultMap.put("error", error != null ? error : "Failed to stop recording");
-                        Log.e(TAG, "❌ Failed to stop recording: " + error);
+                        Log.e(TAG, "Failed to stop recording: " + error);
                     }
 
                     recordingStartTime = 0;
                     recordingPath = null;
 
-                    // Return result to Flutter asynchronously from callback
-                    Log.i(TAG, "🎯 Returning result to Flutter: " + resultMap.toString());
                     flutterResult.success(resultMap);
                 }
             });
 
         } catch (Exception e) {
-            Log.e(TAG, "❌ Exception in stopRecording", e);
+            Log.e(TAG, "Exception in stopRecording", e);
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("success", false);
             errorResult.put("error", e.getMessage());
@@ -2457,7 +2422,6 @@ public class NosmaiAgoraBridge {
     public boolean detachCameraView() {
         try {
             stopCameraPreview();
-
             if (previewView != null) {
                 previewView = null;
             }

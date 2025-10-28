@@ -2,6 +2,9 @@ package io.agora.agora_rtc_ng;
 
 import android.content.Context;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.FrameLayout;
+import android.view.ViewParent;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
@@ -34,40 +37,52 @@ public class NosmaiPlatformViewFactory extends PlatformViewFactory {
      * PlatformView implementation that wraps NosmaiPreviewView
      */
     private static class NosmaiPlatformView implements PlatformView {
-        private final NosmaiPreviewView previewView;
         private final NosmaiAgoraBridge bridge;
+        private final FrameLayout container;
+        private final NosmaiPreviewView preview;
 
         NosmaiPlatformView(Context context, NosmaiAgoraBridge bridge) {
             this.bridge = bridge;
-            this.previewView = bridge.getPreviewView();
+            this.container = new FrameLayout(context);
+            this.container.setBackgroundColor(android.graphics.Color.BLACK);
 
-            // If preview view doesn't exist yet, create a placeholder
-            // The actual preview will be attached when camera starts
-            if (this.previewView == null) {
-                android.util.Log.w("NosmaiPlatformView",
-                    "PreviewView not yet created - will be attached when camera starts");
+            NosmaiPreviewView existing = bridge.getPreviewView();
+            if (existing != null) {
+                preview = existing;
+            } else {
+                preview = new NosmaiPreviewView(context);
+                bridge.setPreviewView(preview);
             }
+            attachPreview(preview);
         }
 
         @NonNull
         @Override
         public View getView() {
-            if (previewView != null) {
-                return previewView;
-            } else {
-                // Return a placeholder view until camera starts
-                android.widget.FrameLayout placeholder = new android.widget.FrameLayout(
-                    bridge.getContext()
-                );
-                placeholder.setBackgroundColor(android.graphics.Color.BLACK);
-                return placeholder;
-            }
+            return container;
         }
 
         @Override
         public void dispose() {
-            // Don't dispose the preview view here - it's managed by the bridge
-            android.util.Log.d("NosmaiPlatformView", "Platform view disposed");
+            if (preview != null && preview.getParent() == container) {
+                container.removeView(preview);
+            }
+            bridge.clearPreviewView(preview);
+        }
+
+        private void attachPreview(@NonNull NosmaiPreviewView view) {
+            ViewParent currentParent = view.getParent();
+            if (currentParent instanceof ViewGroup) {
+                ((ViewGroup) currentParent).removeView(view);
+            }
+            container.removeAllViews();
+            container.addView(view, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+            ));
+
+            view.requestLayout();
+            view.requestRenderUpdate();
         }
     }
 }

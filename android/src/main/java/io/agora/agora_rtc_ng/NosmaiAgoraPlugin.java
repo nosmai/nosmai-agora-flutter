@@ -108,9 +108,6 @@ public class NosmaiAgoraPlugin implements FlutterPlugin, MethodCallHandler {
             result.success(true);
         }
 
-        // ============================================
-        // CAMERA ONLY MODE (Mode 2 - No Streaming)
-        // ============================================
 
         else if ("startCameraPreview".equals(call.method)) {
             boolean success = bridge.startCameraPreview();
@@ -122,9 +119,6 @@ public class NosmaiAgoraPlugin implements FlutterPlugin, MethodCallHandler {
             result.success(success);
         }
 
-        // ============================================
-        // AGORA CONTROLS
-        // ============================================
 
         else if ("enableVideo".equals(call.method)) {
             boolean success = bridge.enableVideo();
@@ -161,9 +155,6 @@ public class NosmaiAgoraPlugin implements FlutterPlugin, MethodCallHandler {
             result.success(success);
         }
 
-        // ============================================
-        // CAMERA CONTROLS
-        // ============================================
 
         else if ("flipCamera".equals(call.method)) {
             boolean success = bridge.flipCamera();
@@ -187,9 +178,6 @@ public class NosmaiAgoraPlugin implements FlutterPlugin, MethodCallHandler {
             result.success(success);
         }
 
-        // ============================================
-        // BEAUTY FILTERS
-        // ============================================
 
         else if ("applySkinSmoothing".equals(call.method)) {
             Double level = call.argument("level");
