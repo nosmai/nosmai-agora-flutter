@@ -66,6 +66,10 @@ public class NosmaiAgoraBridge {
     private static final String FILTERS_PREFIX = "assets/filters/";
     private static final String CACHE_DIR_NAME = "NosmaiLocalFilters";
 
+    // Face Detection optimization: skip frames for better performance
+    // 1 = every frame (30 FPS), 2 = every 2nd frame (15 FPS), 3 = every 3rd frame (10 FPS)
+    private static final int FD_SKIP_FRAMES = 3;
+
     private static NosmaiAgoraBridge instance;
 
     private Context context;
@@ -411,7 +415,6 @@ public class NosmaiAgoraBridge {
 
             previewView = requirePreviewView(context);
 
-            // Try to start processing - if SDK state was lost, re-initialize
             try {
                 NosmaiSDK.startProcessing(previewView);
                 Log.i(TAG, "Nosmai processing started successfully");
@@ -424,16 +427,15 @@ public class NosmaiAgoraBridge {
                 Log.i(TAG, "SDK re-initialized successfully");
             }
 
-            // Set DUAL_OUTPUT mode for streaming
             NosmaiSDK.setRenderMode(NosmaiSDK.RenderMode.DUAL_OUTPUT);
             Log.i(TAG, "Nosmai processing started (DUAL_OUTPUT mode)");
+            com.nosmai.effect.internal.NosmaiFilterEngine.setFDMinSkip(FD_SKIP_FRAMES);
 
-            // Step 6: Setup camera with Camera2Helper
+
             if (startCameraImmediately) {
                 setupCameraCapture();
             }
 
-            // Step 7: Setup frame callback to push to Agora
             setupFrameCallbackForStreaming();
 
             // Step 7: Join channel
@@ -780,6 +782,7 @@ public class NosmaiAgoraBridge {
 
                         NosmaiSDK.startProcessing(previewView);
                         NosmaiSDK.setRenderMode(NosmaiSDK.RenderMode.DUAL_OUTPUT);
+                        com.nosmai.effect.internal.NosmaiFilterEngine.setFDMinSkip(FD_SKIP_FRAMES);
 
                         setupFrameCallbackForStreaming();
 
@@ -798,6 +801,7 @@ public class NosmaiAgoraBridge {
                             NosmaiSDK.initialize(context, storedLicenseKey);
                             NosmaiSDK.startProcessing(previewView);
                             NosmaiSDK.setRenderMode(NosmaiSDK.RenderMode.DUAL_OUTPUT);
+                            com.nosmai.effect.internal.NosmaiFilterEngine.setFDMinSkip(FD_SKIP_FRAMES);
                             setupFrameCallbackForStreaming();
                         }
                     }
