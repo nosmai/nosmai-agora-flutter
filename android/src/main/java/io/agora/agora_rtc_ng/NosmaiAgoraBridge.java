@@ -4,7 +4,9 @@ import android.content.Context;
 import android.util.Log;
 import android.view.View;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
+import android.os.Process;
 
 import com.nosmai.effect.api.NosmaiSDK;
 import com.nosmai.effect.api.NosmaiPreviewView;
@@ -73,6 +75,12 @@ public class NosmaiAgoraBridge {
     private NosmaiPreviewView previewView;
     private Camera2Helper camera2Helper;
 
+    // Threading helpers
+    private HandlerThread beautyThread;
+    private Handler beautyHandler;
+    private final Object beautyTaskLock = new Object();
+    private final Map<String, BeautyCommand> pendingBeautyCommands = new HashMap<>();
+
     // State flags
     private boolean nosmaiInitialized = false;
     private boolean agoraInitialized = false;
@@ -109,6 +117,7 @@ public class NosmaiAgoraBridge {
     private float whiteBalanceTemp = 5000.0f;
     private float whiteBalanceTint = 0.0f;
     private boolean grayscaleEnabled = false;
+    private String currentFilterPath = "";
 
     // Recording state
     private boolean isRecording = false;
@@ -119,6 +128,8 @@ public class NosmaiAgoraBridge {
     private float hsbHue = 0.0f;
     private float hsbSaturation = 0.0f;
     private float hsbBrightness = 0.0f;
+
+    private static final float FLOAT_EQ_EPSILON = 0.0005f;
 
     private final Queue<AgoraVideoFrame> framePool = new ConcurrentLinkedQueue<>();
     private static final int MAX_POOL_SIZE = 5;
@@ -132,8 +143,102 @@ public class NosmaiAgoraBridge {
 
     private NosmaiAgoraBridge(Context context) {
         this.context = context;
+        startBeautyThread();
         resetFilterStates();
         Log.i(TAG, "NosmaiAgoraBridge instance created");
+    }
+
+    private synchronized void startBeautyThread() {
+        if (beautyThread != null) {
+            return;
+        }
+
+        beautyThread = new HandlerThread("NosmaiBeautyThread", Process.THREAD_PRIORITY_DISPLAY);
+        beautyThread.start();
+        beautyHandler = new Handler(beautyThread.getLooper());
+        Log.i(TAG, "Beauty handler thread started");
+    }
+
+    private synchronized void stopBeautyThread() {
+        if (beautyThread == null) {
+            return;
+        }
+
+        HandlerThread thread = beautyThread;
+        beautyThread = null;
+        beautyHandler = null;
+        synchronized (beautyTaskLock) {
+            pendingBeautyCommands.clear();
+        }
+
+        thread.quitSafely();
+        try {
+            thread.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            Log.w(TAG, "Interrupted while stopping beauty thread");
+        }
+        Log.i(TAG, "Beauty handler thread stopped");
+    }
+
+    private boolean submitBeautyTask(String operation, Runnable task) {
+        Handler handler = beautyHandler;
+        if (handler == null) {
+            Log.w(TAG, operation + " requested before handler ready; executing inline");
+            runBeautySafely(operation, task);
+            return true;
+        }
+
+        if (Looper.myLooper() == handler.getLooper()) {
+            synchronized (beautyTaskLock) {
+                BeautyCommand previous = pendingBeautyCommands.remove(operation);
+                if (previous != null) {
+                    handler.removeCallbacks(previous);
+                }
+            }
+            runBeautySafely(operation, task);
+            return true;
+        }
+
+        BeautyCommand command = new BeautyCommand(operation, task);
+        synchronized (beautyTaskLock) {
+            BeautyCommand previous = pendingBeautyCommands.put(operation, command);
+            if (previous != null) {
+                handler.removeCallbacks(previous);
+            }
+        }
+        handler.post(command);
+        return true;
+    }
+
+    private void runBeautySafely(String operation, Runnable task) {
+        try {
+            task.run();
+        } catch (Exception e) {
+            Log.e(TAG, "Error during " + operation, e);
+        }
+    }
+
+    private final class BeautyCommand implements Runnable {
+        private final String operation;
+        private final Runnable delegate;
+
+        BeautyCommand(String operation, Runnable delegate) {
+            this.operation = operation;
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void run() {
+            synchronized (beautyTaskLock) {
+                pendingBeautyCommands.remove(operation);
+            }
+            runBeautySafely(operation, delegate);
+        }
+    }
+
+    private boolean floatEquals(float a, float b) {
+        return Math.abs(a - b) <= FLOAT_EQ_EPSILON;
     }
 
     // ============================================
@@ -157,9 +262,13 @@ public class NosmaiAgoraBridge {
             Log.i(TAG, "Nosmai SDK initialized successfully");
             return true;
         } catch (Exception e) {
-            Log.e(TAG, "❌ Failed to initialize Nosmai SDK", e);
+            Log.e(TAG, "Failed to initialize Nosmai SDK", e);
             return false;
         }
+    }
+
+    public void ensureBeautyThread() {
+        startBeautyThread();
     }
 
     /**
@@ -206,7 +315,7 @@ public class NosmaiAgoraBridge {
             return true;
 
         } catch (Exception e) {
-            Log.e(TAG, "❌ Failed to initialize Agora", e);
+            Log.e(TAG, "Failed to initialize Agora", e);
             return false;
         }
     }
@@ -237,6 +346,10 @@ public class NosmaiAgoraBridge {
             Log.e(TAG, "Error releasing Agora", e);
             return false;
         }
+    }
+
+    public void shutdown() {
+        stopBeautyThread();
     }
 
     // ============================================
@@ -280,7 +393,6 @@ public class NosmaiAgoraBridge {
                 false, // useTexture = false (we'll send buffer data)
                 Constants.ExternalVideoSourceType.VIDEO_FRAME
             );
-            Log.i(TAG, "External video source enabled");
 
             // Step 3: Enable video
             agoraEngine.enableVideo();
@@ -294,21 +406,16 @@ public class NosmaiAgoraBridge {
 
             // Step 5: Initialize Nosmai processing
             if (!nosmaiInitialized || storedLicenseKey == null) {
-                Log.e(TAG, "Nosmai not initialized. Call initialize() first");
                 return false;
             }
 
-            // 🎯 Get fresh preview view (requirePreviewView always creates new)
-            // Platform View Factory may also create and set its own view later
             previewView = requirePreviewView(context);
-            Log.i(TAG, "Using fresh preview view for streaming");
 
             // Try to start processing - if SDK state was lost, re-initialize
             try {
                 NosmaiSDK.startProcessing(previewView);
                 Log.i(TAG, "Nosmai processing started successfully");
             } catch (IllegalStateException e) {
-                // SDK state was cleared by stopProcessing() - re-initialize
                 Log.w(TAG, "⚠️ SDK state lost, re-initializing...");
                 nosmaiInitialized = false;
                 NosmaiSDK.initialize(context, storedLicenseKey);
@@ -649,20 +756,28 @@ public class NosmaiAgoraBridge {
         }
     }
 
-    public boolean enableLocalVideo(boolean enabled) {
-        if (agoraEngine == null) return false;
+    public synchronized boolean enableLocalVideo(boolean enabled) {
+        if (agoraEngine == null) {
+            Log.w(TAG, "Cannot enable local video - Agora not initialized");
+            return false;
+        }
+
         try {
+            Log.i(TAG, "🎥 enableLocalVideo called: " + enabled);
             allowPush = enabled;
             agoraEngine.enableLocalVideo(enabled);
+
             if (enabled) {
                 if (previewView != null) {
                     try {
                         NosmaiSDK.stopProcessing();
+
                         try {
-                            Thread.sleep(50);
+                            Thread.sleep(150);
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                         }
+
                         NosmaiSDK.startProcessing(previewView);
                         NosmaiSDK.setRenderMode(NosmaiSDK.RenderMode.DUAL_OUTPUT);
 
@@ -678,6 +793,7 @@ public class NosmaiAgoraBridge {
                         }
 
                     } catch (Exception e) {
+                        Log.e(TAG, "Error during restart, attempting recovery...", e);
                         if (storedLicenseKey != null) {
                             NosmaiSDK.initialize(context, storedLicenseKey);
                             NosmaiSDK.startProcessing(previewView);
@@ -685,9 +801,10 @@ public class NosmaiAgoraBridge {
                             setupFrameCallbackForStreaming();
                         }
                     }
+                } else {
+                    Log.w(TAG, "⚠️ Preview view is null, cannot restart processing");
                 }
             } else {
-                Log.i(TAG, "Camera disabled (keeping camera capture active)");
             }
 
             return true;
@@ -840,182 +957,140 @@ public class NosmaiAgoraBridge {
     // ============================================
 
     public boolean applySkinSmoothing(float level) {
-        try {
-            skinSmoothingLevel = level;
-            NosmaiBeauty.applySkinSmoothing(level);
+        if (floatEquals(skinSmoothingLevel, level)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying skin smoothing", e);
-            return false;
         }
+        skinSmoothingLevel = level;
+        float normalized = Math.max(0.0f, Math.min(1.0f, level / 10.0f));
+        return submitBeautyTask("applySkinSmoothing", () -> NosmaiBeauty.applySkinSmoothing(normalized));
     }
 
     public boolean applySkinWhitening(float level) {
-        try {
-            skinWhiteningLevel = level;
-            NosmaiBeauty.applySkinWhitening(level);
+        if (floatEquals(skinWhiteningLevel, level)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying skin whitening", e);
-            return false;
         }
+        skinWhiteningLevel = level;
+        float normalized = Math.max(0.0f, Math.min(1.0f, level / 10.0f));
+        return submitBeautyTask("applySkinWhitening", () -> NosmaiBeauty.applySkinWhitening(normalized));
     }
 
     public boolean applyFaceSlimming(float level) {
-        try {
-            faceSlimmingLevel = level;
-            NosmaiBeauty.applyFaceSlimming(level);
+        if (floatEquals(faceSlimmingLevel, level)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying face slimming", e);
-            return false;
         }
+        faceSlimmingLevel = level;
+        float normalized = Math.max(0.0f, Math.min(1.0f, level / 10.0f)) * 0.1f;
+        return submitBeautyTask("applyFaceSlimming", () -> NosmaiBeauty.applyFaceSlimming(normalized));
     }
 
     public boolean applyEyeEnlargement(float level) {
-        try {
-            eyeEnlargementLevel = level;
-            NosmaiBeauty.applyEyeEnlargement(level);
+        if (floatEquals(eyeEnlargementLevel, level)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying eye enlargement", e);
-            return false;
         }
+        eyeEnlargementLevel = level;
+        float normalized = Math.max(0.0f, Math.min(1.0f, level / 10.0f)) * 0.1f;
+        return submitBeautyTask("applyEyeEnlargement", () -> NosmaiBeauty.applyEyeEnlargement(normalized));
     }
 
     public boolean applyNoseSize(float level) {
-        try {
-            noseSizeLevel = level;
-            NosmaiBeauty.applyNoseSize(level);
+        if (floatEquals(noseSizeLevel, level)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying nose size", e);
-            return false;
         }
+        noseSizeLevel = level;
+        float normalized = Math.max(0.0f, Math.min(1.0f, level / 100.0f));
+        return submitBeautyTask("applyNoseSize", () -> NosmaiBeauty.applyNoseSize(normalized));
     }
 
     public boolean applyBrightness(float brightness) {
-        try {
-            brightnessLevel = brightness;
-            NosmaiBeauty.applyBrightness(brightness);
+        if (floatEquals(brightnessLevel, brightness)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying brightness", e);
-            return false;
         }
+        brightnessLevel = brightness;
+        return submitBeautyTask("applyBrightness", () -> NosmaiBeauty.applyBrightness(brightness));
     }
 
     public boolean applyContrast(float contrast) {
-        try {
-            contrastLevel = contrast;
-            NosmaiBeauty.applyContrast(contrast);
+        if (floatEquals(contrastLevel, contrast)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying contrast", e);
-            return false;
         }
+        contrastLevel = contrast;
+        return submitBeautyTask("applyContrast", () -> NosmaiBeauty.applyContrast(contrast));
     }
 
     public boolean applyHue(float hue) {
-        try {
-            hueLevel = hue;
-            NosmaiBeauty.applyHue(hue);
+        if (floatEquals(hueLevel, hue)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying hue", e);
-            return false;
         }
+        hueLevel = hue;
+        return submitBeautyTask("applyHue", () -> NosmaiBeauty.applyHue(hue));
     }
 
     public boolean applyRGB(float red, float green, float blue) {
-        try {
-            redMultiplier = red;
-            greenMultiplier = green;
-            blueMultiplier = blue;
-            NosmaiBeauty.applyRGB(red, green, blue);
+        if (floatEquals(redMultiplier, red) && floatEquals(greenMultiplier, green) && floatEquals(blueMultiplier, blue)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying RGB", e);
-            return false;
         }
+        redMultiplier = red;
+        greenMultiplier = green;
+        blueMultiplier = blue;
+        return submitBeautyTask("applyRGB", () -> NosmaiBeauty.applyRGB(red, green, blue));
     }
 
     public boolean applyLipstick(float intensity) {
-        try {
-            lipstickLevel = intensity;
-            NosmaiBeauty.applyLipstick(intensity);
+        if (floatEquals(lipstickLevel, intensity)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying lipstick", e);
-            return false;
         }
+        lipstickLevel = intensity;
+        float reduced = intensity * 0.1f;
+        return submitBeautyTask("applyLipstick", () -> NosmaiBeauty.applyLipstick(reduced));
     }
 
     public boolean applyBlusher(float intensity) {
-        try {
-            blusherLevel = intensity;
-            NosmaiBeauty.applyBlusher(intensity);
+        if (floatEquals(blusherLevel, intensity)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying blusher", e);
-            return false;
         }
+        blusherLevel = intensity;
+        return submitBeautyTask("applyBlusher", () -> NosmaiBeauty.applyBlusher(intensity));
     }
 
     public boolean applyExposure(float exposure) {
-        try {
-            exposureLevel = exposure;
-            NosmaiBeauty.applyExposure(exposure);
+        if (floatEquals(exposureLevel, exposure)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying exposure", e);
-            return false;
         }
+        exposureLevel = exposure;
+        return submitBeautyTask("applyExposure", () -> NosmaiBeauty.applyExposure(exposure));
     }
 
     public boolean applySaturation(float saturation) {
-        try {
-            saturationLevel = saturation;
-            NosmaiBeauty.applySaturation(saturation);
+        if (floatEquals(saturationLevel, saturation)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying saturation", e);
-            return false;
         }
+        saturationLevel = saturation;
+        return submitBeautyTask("applySaturation", () -> NosmaiBeauty.applySaturation(saturation));
     }
 
     public boolean applySharpening(float sharpening) {
-        try {
-            sharpenLevel = sharpening;
-            NosmaiBeauty.applySharpen(sharpening);
+        if (floatEquals(sharpenLevel, sharpening)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying sharpening", e);
-            return false;
         }
+        sharpenLevel = sharpening;
+        return submitBeautyTask("applySharpening", () -> NosmaiBeauty.applySharpen(sharpening));
     }
 
     public boolean applyWhiteBalance(float temperatureK, float tint) {
-        try {
-            whiteBalanceTemp = temperatureK;
-            whiteBalanceTint = tint;
-            NosmaiBeauty.applyWhiteBalance(temperatureK, tint);
+        if (floatEquals(whiteBalanceTemp, temperatureK) && floatEquals(whiteBalanceTint, tint)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying white balance", e);
-            return false;
         }
+        whiteBalanceTemp = temperatureK;
+        whiteBalanceTint = tint;
+        return submitBeautyTask("applyWhiteBalance", () -> NosmaiBeauty.applyWhiteBalance(temperatureK, tint));
     }
 
     public boolean setGrayscaleEnabled(boolean enabled) {
-        try {
-            grayscaleEnabled = enabled;
-            NosmaiBeauty.setGrayscaleEnabled(enabled);
+        if (grayscaleEnabled == enabled) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error setting grayscale", e);
-            return false;
         }
+        grayscaleEnabled = enabled;
+        return submitBeautyTask("setGrayscaleEnabled", () -> NosmaiBeauty.setGrayscaleEnabled(enabled));
     }
 
     // ============================================
@@ -1023,30 +1098,29 @@ public class NosmaiAgoraBridge {
     // ============================================
 
     public boolean applyFilter(String path) {
-        try {
-            if (path == null || path.isEmpty()) {
-                return removeAllFilters();
-            }
+        if (path == null || path.isEmpty()) {
+            return removeAllFilters();
+        }
+
+        if (path.equals(currentFilterPath)) {
+            return true;
+        }
+        currentFilterPath = path;
+
+        return submitBeautyTask("applyFilter", () -> {
             NosmaiEffects.applyEffect(path, null);
             Log.i(TAG, "Filter applied: " + path);
-            return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying filter", e);
-            return false;
-        }
+        });
     }
 
     public boolean removeAllFilters() {
-        try {
+        currentFilterPath = "";
+        return submitBeautyTask("removeAllFilters", () -> {
             NosmaiEffects.removeEffect(null);
             NosmaiBeauty.removeAllBeautyFilters();
             resetFilterStates();
             Log.i(TAG, "All filters removed");
-            return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error removing filters", e);
-            return false;
-        }
+        });
     }
 
     public List<Map<String, Object>> getLocalFilters() {
@@ -1308,84 +1382,91 @@ public class NosmaiAgoraBridge {
     // ============================================
 
     public boolean applyMakeupBlendLevel(String filterName, float level) {
-        try {
-            if (filterName == null || filterName.isEmpty()) {
-                Log.w(TAG, "Filter name is empty");
-                return false;
-            }
-
-            String filterLower = filterName.toLowerCase();
-
-            // Normalize level from 0-100 to 0.0-1.0
-            float normalized = Math.max(0.0f, Math.min(1.0f, level / 100.0f));
-
-            // Route to appropriate beauty filter - execute immediately
-            if (filterLower.contains("lipstick")) {
-                lipstickLevel = normalized;
-                NosmaiBeauty.applyLipstick(normalized);
-                return true;
-            } else if (filterLower.contains("blusher")) {
-                blusherLevel = normalized;
-                NosmaiBeauty.applyBlusher(normalized);
-                return true;
-            } else if (filterLower.contains("smoothing") || filterLower.contains("skinsmoothing")) {
-                skinSmoothingLevel = normalized;
-                NosmaiBeauty.applySkinSmoothing(normalized);
-                return true;
-            } else if (filterLower.contains("whitening") || filterLower.contains("skinwhitening")) {
-                skinWhiteningLevel = normalized;
-                NosmaiBeauty.applySkinWhitening(normalized);
-                return true;
-            } else {
-                Log.w(TAG, "Unknown makeup filter: " + filterName);
-                return false;
-            }
-
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying makeup blend", e);
+        if (filterName == null || filterName.isEmpty()) {
+            Log.w(TAG, "Filter name is empty");
             return false;
         }
+
+        final String filterLower = filterName.toLowerCase();
+        final float normalized = Math.max(0.0f, Math.min(1.0f, level / 10.0f));
+
+        Runnable task;
+        if (filterLower.contains("lipstick")) {
+            final float reduced = normalized * 0.1f;
+            // Store reduced value for state tracking
+            if (floatEquals(lipstickLevel, reduced)) {
+                return true;
+            }
+            task = () -> {
+                lipstickLevel = reduced;
+                NosmaiBeauty.applyLipstick(reduced);
+            };
+        } else if (filterLower.contains("blusher")) {
+            // Store original value for state tracking
+            if (floatEquals(blusherLevel, normalized)) {
+                return true;
+            }
+            final float finalNormalized = normalized;
+            task = () -> {
+                blusherLevel = finalNormalized;
+                NosmaiBeauty.applyBlusher(finalNormalized);
+            };
+        } else if (filterLower.contains("smoothing") || filterLower.contains("skinsmoothing")) {
+            // Store original value for state tracking
+            if (floatEquals(skinSmoothingLevel, normalized)) {
+                return true;
+            }
+            final float finalNormalized = normalized;
+            task = () -> {
+                skinSmoothingLevel = finalNormalized;
+                NosmaiBeauty.applySkinSmoothing(finalNormalized);
+            };
+        } else if (filterLower.contains("whitening") || filterLower.contains("skinwhitening")) {
+            // Store original value for state tracking
+            if (floatEquals(skinWhiteningLevel, normalized)) {
+                return true;
+            }
+            final float finalNormalized = normalized;
+            task = () -> {
+                skinWhiteningLevel = finalNormalized;
+                NosmaiBeauty.applySkinWhitening(finalNormalized);
+            };
+        } else {
+            Log.w(TAG, "Unknown makeup filter: " + filterName);
+            return false;
+        }
+
+        return submitBeautyTask("applyMakeupBlendLevel", task);
     }
 
     public boolean adjustHSB(float hue, float saturation, float brightness) {
-        try {
-            // Update state
-            hsbHue = hue;
-            hsbSaturation = saturation;
-            hsbBrightness = brightness;
-
-            // Apply hue (0-360 degrees)
-            NosmaiBeauty.applyHue(hue);
-
-            // Apply saturation (typically 0.0-2.0, where 1.0 is normal)
-            NosmaiBeauty.applySaturation(saturation);
-
-            // Apply brightness (-1.0 to 1.0, where 0.0 is normal)
-            NosmaiBeauty.applyBrightness(brightness);
-
+        if (floatEquals(hsbHue, hue) && floatEquals(hsbSaturation, saturation) && floatEquals(hsbBrightness, brightness)) {
             return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error adjusting HSB", e);
-            return false;
         }
+        hsbHue = hue;
+        hsbSaturation = saturation;
+        hsbBrightness = brightness;
+
+        return submitBeautyTask("adjustHSB", () -> {
+            NosmaiBeauty.applyHue(hue);
+            NosmaiBeauty.applySaturation(saturation);
+            NosmaiBeauty.applyBrightness(brightness);
+        });
     }
 
     public boolean resetHSBFilter() {
-        try {
-            // Reset to default values
-            hsbHue = 0.0f;
-            hsbSaturation = 1.0f; // 1.0 = normal saturation
-            hsbBrightness = 0.0f; // 0.0 = normal brightness
+        if (floatEquals(hsbHue, 0.0f) && floatEquals(hsbSaturation, 1.0f) && floatEquals(hsbBrightness, 0.0f)) {
+            return true;
+        }
+        hsbHue = 0.0f;
+        hsbSaturation = 1.0f;
+        hsbBrightness = 0.0f;
 
+        return submitBeautyTask("resetHSBFilter", () -> {
             NosmaiBeauty.applyHue(0.0f);
             NosmaiBeauty.applySaturation(1.0f);
             NosmaiBeauty.applyBrightness(0.0f);
-
-            return true;
-        } catch (Exception e) {
-            Log.e(TAG, "Error resetting HSB", e);
-            return false;
-        }
+        });
     }
 
     // ============================================
@@ -1396,12 +1477,7 @@ public class NosmaiAgoraBridge {
         try {
             stopCustomCamera();
             releaseAgora();
-            // 🚀 Clear frame pool
             clearFramePool();
-            // ❌ No longer needed - debouncing removed
-            // clearPendingFilterUpdates();
-            // Don't call NosmaiSDK.cleanup() here - it terminates internal executors permanently
-            // SDK should remain initialized for subsequent camera starts
             Log.i(TAG, "Cleanup complete (SDK remains initialized)");
             return true;
         } catch (Exception e) {
@@ -1437,6 +1513,7 @@ public class NosmaiAgoraBridge {
         hsbHue = 0.0f;
         hsbSaturation = 0.0f;
         hsbBrightness = 0.0f;
+        currentFilterPath = "";
     }
 
     // ============================================
@@ -1717,7 +1794,7 @@ public class NosmaiAgoraBridge {
     // DEBOUNCING HELPER (Performance Optimization)
     // ============================================
 
-    // ❌ REMOVED: Debouncing helper methods - no longer needed
+    // REMOVED: Debouncing helper methods - no longer needed
     // These methods caused filters to queue and execute in batches, which conflicted
     // with Flutter's manual apply pattern and caused performance issues
 
@@ -2342,13 +2419,16 @@ public class NosmaiAgoraBridge {
     public boolean setTorchMode(String mode) {
         try {
             if (camera2Helper == null) {
-                Log.w(TAG, "Camera2Helper not initialized");
+                Log.w(TAG, "Camera2Helper not initialized, cannot set torch");
                 return false;
             }
 
-            boolean enable = "on".equalsIgnoreCase(mode);
+            // Handle auto mode same as on (since Camera2 doesn't have native auto mode for torch)
+            boolean enable = "on".equalsIgnoreCase(mode) || "auto".equalsIgnoreCase(mode);
+
+
             camera2Helper.setTorchMode(enable);
-            Log.i(TAG, "Torch mode set to: " + mode);
+            Log.i(TAG, "✅ Torch mode set successfully: " + mode);
             return true;
         } catch (Exception e) {
             Log.e(TAG, "Error setting torch mode", e);

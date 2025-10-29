@@ -36,11 +36,15 @@ public class NosmaiAgoraPlugin implements FlutterPlugin, MethodCallHandler {
 
         // Initialize bridge singleton
         bridge = NosmaiAgoraBridge.getInstance(context);
+        bridge.ensureBeautyThread();
     }
 
     @Override
     public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
         channel.setMethodCallHandler(null);
+        if (bridge != null) {
+            bridge.shutdown();
+        }
         Log.i(TAG, "NosmaiAgoraPlugin detached from engine");
     }
 

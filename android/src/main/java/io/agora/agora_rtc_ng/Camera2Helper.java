@@ -95,18 +95,34 @@ public class Camera2Helper {
         mFrameCallback = callback;
     }
 
-    public void startCamera() {
-        mFirstFrameLogged = false;
-        startBackgroundThread();
-        openCamera();
+    // ✅ FIX: Add flag to prevent multiple simultaneous start calls
+    private boolean mIsStarting = false;
+
+    public synchronized void startCamera() {
+        // ✅ FIX: Prevent starting if already in progress
+        if (mIsStarting) {
+            Log.w(TAG, "⚠️ Camera start already in progress, ignoring");
+            return;
+        }
+
+        mIsStarting = true;
+        try {
+            Log.i(TAG, "📸 Starting camera...");
+            mFirstFrameLogged = false;
+            startBackgroundThread();
+            openCamera();
+        } finally {
+            mIsStarting = false;
+        }
     }
 
-    public void stopCamera() {
+    public synchronized void stopCamera() {
         try {
+            Log.i(TAG, "🛑 Stopping camera...");
             closeCamera();
             stopBackgroundThread();
         } catch (Exception e) {
-            Log.e(TAG, "Error during camera stop: " + e.getMessage());
+            Log.e(TAG, "❌ Error during camera stop: " + e.getMessage());
         }
     }
 
@@ -273,12 +289,23 @@ public class Camera2Helper {
                     targets, new CameraCaptureSession.StateCallback() {
                         @Override
                         public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {
-                            if (mCameraDevice == null) {
-                                return;
+                            // ✅ FIX: Check if camera was closed during rapid switches
+                            synchronized (mCameraOpenCloseLock) {
+                                if (mCameraDevice == null) {
+                                    Log.w(TAG, "⚠️ Camera device is null in onConfigured, aborting");
+                                    return;
+                                }
+
+                                mCaptureSession = cameraCaptureSession;
                             }
 
-                            mCaptureSession = cameraCaptureSession;
                             try {
+                                // ✅ FIX: Double-check camera device before using it
+                                if (mCameraDevice == null) {
+                                    Log.w(TAG, "⚠️ Camera device became null, aborting capture request");
+                                    return;
+                                }
+
                                 // Get best supported FPS range for optimal performance
                                 Range<Integer> fpsRange = getBestFpsRange();
                                 mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange);
@@ -289,11 +316,32 @@ public class Camera2Helper {
                                 mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
                                         CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
 
-                                CaptureRequest request = mPreviewRequestBuilder.build();
-                                mCaptureSession.setRepeatingRequest(request, null, mBackgroundHandler);
+                                // ✅ FIX: Apply flash mode if it was set before session was ready
+                                if (mFlashEnabled && !isFrontCamera()) {
+                                    mPreviewRequestBuilder.set(CaptureRequest.FLASH_MODE,
+                                            CaptureRequest.FLASH_MODE_TORCH);
+                                    Log.i(TAG, "✅ Flash enabled on session start");
+                                } else {
+                                    mPreviewRequestBuilder.set(CaptureRequest.FLASH_MODE,
+                                            CaptureRequest.FLASH_MODE_OFF);
+                                }
 
+                                CaptureRequest request = mPreviewRequestBuilder.build();
+
+                                // ✅ FIX: Final check before setRepeatingRequest
+                                synchronized (mCameraOpenCloseLock) {
+                                    if (mCameraDevice != null && mCaptureSession != null) {
+                                        mCaptureSession.setRepeatingRequest(request, null, mBackgroundHandler);
+                                        Log.i(TAG, "✅ Capture session started successfully");
+                                    } else {
+                                        Log.w(TAG, "⚠️ Camera was closed during configuration");
+                                    }
+                                }
+
+                            } catch (IllegalStateException e) {
+                                Log.e(TAG, "❌ Camera was closed during setRepeatingRequest", e);
                             } catch (CameraAccessException e) {
-                                Log.e(TAG, "Failed to set up capture request", e);
+                                Log.e(TAG, "❌ Failed to set up capture request", e);
                             }
                         }
 
@@ -506,36 +554,72 @@ public class Camera2Helper {
 
     /**
      * Update flash mode in capture request
+     * ✅ FIX: Added protection against camera being closed during rapid switches
      */
     private void updateFlashMode() {
         if (mPreviewRequestBuilder != null && mCaptureSession != null) {
             try {
-                if (mFlashEnabled && !isFrontCamera()) {
+                // ✅ FIX: Check camera device before proceeding
+                if (mCameraDevice == null) {
+                    Log.w(TAG, "⚠️ Camera device is null, cannot update flash mode");
+                    return;
+                }
+
+                boolean shouldEnable = mFlashEnabled && !isFrontCamera();
+                Log.d(TAG, "🔦 Updating flash mode: enabled=" + mFlashEnabled +
+                          ", isFront=" + isFrontCamera() + ", willEnable=" + shouldEnable);
+
+                if (shouldEnable) {
                     mPreviewRequestBuilder.set(CaptureRequest.FLASH_MODE,
                             CaptureRequest.FLASH_MODE_TORCH);
+                    Log.i(TAG, "✅ Flash TORCH mode applied");
                 } else {
                     mPreviewRequestBuilder.set(CaptureRequest.FLASH_MODE,
                             CaptureRequest.FLASH_MODE_OFF);
+                    Log.d(TAG, "Flash OFF mode applied");
                 }
-                mCaptureSession.setRepeatingRequest(mPreviewRequestBuilder.build(),
-                        null, mBackgroundHandler);
+
+                // ✅ FIX: Synchronize access to avoid race conditions
+                synchronized (mCameraOpenCloseLock) {
+                    if (mCaptureSession != null && mCameraDevice != null) {
+                        mCaptureSession.setRepeatingRequest(mPreviewRequestBuilder.build(),
+                                null, mBackgroundHandler);
+                    }
+                }
+            } catch (IllegalStateException e) {
+                Log.e(TAG, "❌ Camera was closed while updating flash mode", e);
             } catch (CameraAccessException e) {
-                Log.e(TAG, "Failed to update flash mode", e);
+                Log.e(TAG, "❌ Failed to update flash mode", e);
             }
+        } else {
+            Log.w(TAG, "⚠️ Cannot update flash mode - capture session not ready (builder=" +
+                  (mPreviewRequestBuilder != null) + ", session=" + (mCaptureSession != null) + ")");
         }
     }
 
     /**
      * Switch camera (requires restart)
+     * ✅ FIX: Synchronized to prevent rapid switch crashes
      */
-    public void switchCamera() {
+    public synchronized void switchCamera() {
+        Log.i(TAG, "🔄 Switching camera...");
 
         // Switch facing
         mCurrentCameraFacing = (mCurrentCameraFacing == CameraCharacteristics.LENS_FACING_FRONT)
                 ? CameraCharacteristics.LENS_FACING_BACK
                 : CameraCharacteristics.LENS_FACING_FRONT;
+
         stopCamera();
+
+        // ✅ FIX: Add delay to ensure camera is fully stopped before restart
+        try {
+            Thread.sleep(200);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
         startCamera();
+        Log.i(TAG, "✅ Camera switched successfully");
     }
 
     /**
