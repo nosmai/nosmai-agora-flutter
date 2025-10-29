@@ -176,6 +176,11 @@
     _whiteBalanceTemp = 5000.0f;
     _whiteBalanceTint = 0.0f;
     _grayscaleEnabled = NO;
+
+    // ✅ Reset HSB filter states
+    _hsbHue = 0.0f;
+    _hsbSaturation = 1.0f;
+    _hsbBrightness = 1.0f;
 }
 
 - (BOOL)hasActiveFilters {
@@ -2077,9 +2082,13 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 - (BOOL)isBeautyFilterEnabled {
 #if HAS_NOSMAI_FRAMEWORK
     @try {
-        // Check beauty filter status via Nosmai SDK
-        return YES;
+        // Check if beauty features are enabled by license
+        if (self.nosmaiSDK && [self.nosmaiSDK respondsToSelector:@selector(isBeautyEffectEnabled)]) {
+            return [self.nosmaiSDK isBeautyEffectEnabled];
+        }
+        return NO;
     } @catch (NSException *exception) {
+        NSLog(@"isBeautyFilterEnabled: Exception - %@", exception.reason);
         return NO;
     }
 #else

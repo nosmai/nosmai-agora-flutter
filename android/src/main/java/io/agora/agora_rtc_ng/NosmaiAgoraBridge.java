@@ -13,6 +13,7 @@ import com.nosmai.effect.api.NosmaiPreviewView;
 import com.nosmai.effect.api.NosmaiBeauty;
 import com.nosmai.effect.NosmaiEffects;
 import com.nosmai.effect.api.NosmaiCloud;
+import com.nosmai.effect.internal.Nosmai;
 
 import io.agora.rtc2.RtcEngine;
 import io.agora.rtc2.RtcEngineConfig;
@@ -1378,7 +1379,8 @@ public class NosmaiAgoraBridge {
     }
 
     public boolean isBeautyFilterEnabled() {
-        return hasActiveFilters();
+        // Check if beauty features are enabled by license
+        return Nosmai.isBeautyEnabled();
     }
 
     // ============================================
