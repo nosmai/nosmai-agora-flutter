@@ -83,9 +83,10 @@
     } else if ([call.method isEqualToString:@"startProcessing"]) {
         BOOL startProcessingResult = [bridge startProcessing];
         result(@(startProcessingResult));
-        
+
     } else if ([call.method isEqualToString:@"stopProcessing"]) {
-        BOOL stopProcessingResult = [bridge stopStreaming];
+        // ✅ Fixed: Call correct method stopProcessing instead of stopStreaming
+        BOOL stopProcessingResult = [bridge stopProcessing];
         result(@(stopProcessingResult));
         
     } else if ([call.method isEqualToString:@"setClientRole"]) {
@@ -303,22 +304,29 @@
     } else if ([call.method isEqualToString:@"saveImageToGallery"]) {
         FlutterStandardTypedData *typedData = call.arguments[@"imageData"];
         NSString *imageName = call.arguments[@"name"];
-        
+
         NSData *imageData = nil;
         if (typedData && [typedData isKindOfClass:[FlutterStandardTypedData class]]) {
             imageData = typedData.data;
         }
-        
-        NSDictionary<NSString *, id> *imageSaveResult = [bridge saveImageToGallery:imageData ?: [NSData data]
-                                                                               name:imageName ?: @"nosmai_image"];
-        result(imageSaveResult);
-        
+
+        // ✅ Use new async method with completion handler
+        [bridge saveImageToGalleryWithData:imageData ?: [NSData data]
+                                      name:imageName ?: @"nosmai_image"
+                                completion:^(NSDictionary<NSString *, id> *imageSaveResult) {
+            result(imageSaveResult);
+        }];
+
     } else if ([call.method isEqualToString:@"saveVideoToGallery"]) {
         NSString *videoPath = call.arguments[@"videoPath"];
         NSString *videoName = call.arguments[@"name"];
-        NSDictionary<NSString *, id> *videoSaveResult = [bridge saveVideoToGallery:videoPath ?: @""
-                                                                               name:videoName ?: @"nosmai_video"];
-        result(videoSaveResult);
+
+        // ✅ Use new async method with completion handler
+        [bridge saveVideoToGalleryWithPath:videoPath ?: @""
+                                      name:videoName ?: @"nosmai_video"
+                                completion:^(NSDictionary<NSString *, id> *videoSaveResult) {
+            result(videoSaveResult);
+        }];
         
     } else if ([call.method isEqualToString:@"adjustHSB"]) {
         NSNumber *hue = call.arguments[@"hue"];

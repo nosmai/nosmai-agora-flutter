@@ -95,11 +95,9 @@ public class Camera2Helper {
         mFrameCallback = callback;
     }
 
-    // ✅ FIX: Add flag to prevent multiple simultaneous start calls
     private boolean mIsStarting = false;
 
     public synchronized void startCamera() {
-        // ✅ FIX: Prevent starting if already in progress
         if (mIsStarting) {
             Log.w(TAG, "⚠️ Camera start already in progress, ignoring");
             return;
@@ -107,7 +105,7 @@ public class Camera2Helper {
 
         mIsStarting = true;
         try {
-            Log.i(TAG, "📸 Starting camera...");
+            Log.i(TAG, "Starting camera...");
             mFirstFrameLogged = false;
             startBackgroundThread();
             openCamera();
@@ -118,11 +116,11 @@ public class Camera2Helper {
 
     public synchronized void stopCamera() {
         try {
-            Log.i(TAG, "🛑 Stopping camera...");
+            Log.i(TAG, "Stopping camera...");
             closeCamera();
             stopBackgroundThread();
         } catch (Exception e) {
-            Log.e(TAG, "❌ Error during camera stop: " + e.getMessage());
+            Log.e(TAG, "Error during camera stop: " + e.getMessage());
         }
     }
 
@@ -289,7 +287,6 @@ public class Camera2Helper {
                     targets, new CameraCaptureSession.StateCallback() {
                         @Override
                         public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {
-                            // ✅ FIX: Check if camera was closed during rapid switches
                             synchronized (mCameraOpenCloseLock) {
                                 if (mCameraDevice == null) {
                                     Log.w(TAG, "⚠️ Camera device is null in onConfigured, aborting");
@@ -300,39 +297,33 @@ public class Camera2Helper {
                             }
 
                             try {
-                                // ✅ FIX: Double-check camera device before using it
                                 if (mCameraDevice == null) {
                                     Log.w(TAG, "⚠️ Camera device became null, aborting capture request");
                                     return;
                                 }
 
-                                // Get best supported FPS range for optimal performance
                                 Range<Integer> fpsRange = getBestFpsRange();
                                 mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange);
 
-                                // Set auto-exposure and auto-focus for stability
                                 mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
                                         CaptureRequest.CONTROL_AE_MODE_ON);
                                 mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
                                         CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
 
-                                // ✅ FIX: Apply flash mode if it was set before session was ready
                                 if (mFlashEnabled && !isFrontCamera()) {
                                     mPreviewRequestBuilder.set(CaptureRequest.FLASH_MODE,
                                             CaptureRequest.FLASH_MODE_TORCH);
-                                    Log.i(TAG, "✅ Flash enabled on session start");
+                                    Log.i(TAG, "Flash enabled on session start");
                                 } else {
                                     mPreviewRequestBuilder.set(CaptureRequest.FLASH_MODE,
                                             CaptureRequest.FLASH_MODE_OFF);
                                 }
 
                                 CaptureRequest request = mPreviewRequestBuilder.build();
-
-                                // ✅ FIX: Final check before setRepeatingRequest
                                 synchronized (mCameraOpenCloseLock) {
                                     if (mCameraDevice != null && mCaptureSession != null) {
                                         mCaptureSession.setRepeatingRequest(request, null, mBackgroundHandler);
-                                        Log.i(TAG, "✅ Capture session started successfully");
+                                        Log.i(TAG, "Capture session started successfully");
                                     } else {
                                         Log.w(TAG, "⚠️ Camera was closed during configuration");
                                     }

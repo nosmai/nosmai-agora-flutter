@@ -71,6 +71,13 @@
 // Thread-safe cleanup flag (atomic to prevent race conditions)
 @property (atomic, assign) BOOL isCleaningUp;
 
+// Serial queue for preview view access (thread-safe)
+@property (nonatomic, strong) dispatch_queue_t previewAccessQueue;
+
+@property (nonatomic, strong) CIContext *sharedCIContext;
+
+@property (atomic, assign) BOOL isProcessingFrame;
+
 @end
 
 @implementation NosmaiAgoraBridge
@@ -91,8 +98,15 @@
     if (self) {
         [self resetFilterStates];
         _videoDataOutputQueue = dispatch_queue_create("com.agora.nosmai.videoQueue", DISPATCH_QUEUE_SERIAL);
+        _previewAccessQueue = dispatch_queue_create("com.agora.nosmai.previewQueue", DISPATCH_QUEUE_SERIAL);
         _mirrorModeEnabled = NO;
         _isCleaningUp = NO;
+        _isProcessingFrame = NO;
+
+        _sharedCIContext = [CIContext contextWithOptions:@{
+            kCIContextUseSoftwareRenderer: @NO,  
+            kCIContextPriorityRequestLow: @NO
+        }];
     }
     return self;
 }
@@ -100,21 +114,27 @@
 #pragma mark - Preview View Management
 
 - (void)setLocalPreviewView:(UIView *)view {
+    dispatch_sync(self.previewAccessQueue, ^{
+        _localPreviewView = view;
+    });
+
     if (!view) {
-        _localPreviewView = nil;
         return;
     }
-    
+
     @try {
-        _localPreviewView = view;
-        
 #if HAS_NOSMAI_FRAMEWORK
         if (self.nosmaiSDK) {
             if ([NSThread isMainThread]) {
                 [self.nosmaiSDK setPreviewView:view];
             } else {
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    if (_localPreviewView == view) {
+                    // ✅ Thread-safe getter in async block
+                    __block UIView *currentView = nil;
+                    dispatch_sync(self.previewAccessQueue, ^{
+                        currentView = _localPreviewView;
+                    });
+                    if (currentView == view) {
                         [self.nosmaiSDK setPreviewView:view];
                     }
                 });
@@ -127,7 +147,11 @@
 }
 
 - (UIView *)getLocalPreviewView {
-    return _localPreviewView;
+    __block UIView *view = nil;
+    dispatch_sync(self.previewAccessQueue, ^{
+        view = _localPreviewView;
+    });
+    return view;
 }
 
 #pragma mark - Private Methods
@@ -394,9 +418,22 @@
     self.isCleaningUp = YES;
     self.allowPush = NO;
     self.channelJoined = NO;
-    // ⚠️ DO NOT clear localPreviewView - camera mode will reuse it!
-    // self.localPreviewView = nil;
-    [self stopCamera]; 
+    self.isProcessingFrame = NO; 
+
+    __block UIView *previewView = nil;
+    dispatch_sync(self.previewAccessQueue, ^{
+        previewView = _localPreviewView;
+    });
+    if (previewView) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIImageView *imageView = (UIImageView *)[previewView viewWithTag:999];
+            if (imageView) {
+                imageView.image = nil; 
+            }
+        });
+    }
+
+    [self stopCamera];
     [NSThread sleepForTimeInterval:0.8];
 #if HAS_NOSMAI_FRAMEWORK
     if (self.nosmaiSDK) {
@@ -405,32 +442,39 @@
     }
 #endif
 
-    // 🎯 STEP 7: Disable external video source
     if (self.agoraEngine) {
         [self.agoraEngine setExternalVideoSource:NO useTexture:NO sourceType:AgoraExternalVideoSourceTypeVideoFrame];
     }
-
-    // 🎯 STEP 8: Leave channel (async operation)
     if (self.agoraEngine) {
         [self.agoraEngine leaveChannel:nil];
         [NSThread sleepForTimeInterval:0.5];
     }
 
-    // 🎯 STEP 9: Destroy Agora engine
     if (self.agoraEngine) {
         [AgoraRtcEngineKit destroy];
         self.agoraEngine = nil;
         self.agoraInitialized = NO;
     }
-
-    // 🎯 STEP 10: Clear state variables
     self.currentChannelId = nil;
     self.currentUserId = 0;
     self.isCustomCameraActive = NO;
 
-    // 🎯 STEP 11: Reset cleanup flag (allow future sessions)
+    self.sharedCIContext = nil;
+
     self.isCleaningUp = NO;
 
+}
+
+#pragma mark - Helper Methods
+
+- (CIContext *)ensureCIContext {
+    if (!self.sharedCIContext) {
+        self.sharedCIContext = [CIContext contextWithOptions:@{
+            kCIContextUseSoftwareRenderer: @NO,
+            kCIContextPriorityRequestLow: @NO
+        }];
+    }
+    return self.sharedCIContext;
 }
 
 #pragma mark - Camera Management
@@ -503,6 +547,12 @@
     // 🎯 STEP 4: Stop Nosmai processing
     if (self.nosmaiSDK) {
         [self.nosmaiSDK stopProcessing];
+    }
+
+    if (self.nosmaiCamera) {
+        [self.nosmaiCamera stopCapture];
+        [self.nosmaiCamera detachFromView];
+        self.nosmaiCamera = nil;
     }
 #endif
 
@@ -761,13 +811,11 @@
     }
 }
 
-// Additional filter methods following same pattern...
 
 - (BOOL)applyExposure:(float)exposure {
     // Note: Exposure might need custom implementation or HSB adjustment
     @try {
         exposure = fmaxf(-10.0f, fminf(10.0f, exposure));
-        // Implement via HSB or custom filter if available
         self.exposureLevel = exposure;
         return YES;
     } @catch (NSException *exception) {
@@ -781,7 +829,6 @@
     
     @try {
         saturation = fmaxf(0.0f, fminf(2.0f, saturation));
-        // Use HSB adjustment for saturation with default values for hue and brightness
         float currentHue = self.hueLevel; // Default 0.0 (no hue shift)
         float currentBrightness = (self.brightnessLevel == 0.0f) ? 1.0f : self.brightnessLevel; // Default 1.0 (normal brightness)
         [self.nosmaiSDK adjustHSBWithHue:currentHue saturation:saturation brightness:currentBrightness];
@@ -822,10 +869,8 @@
         [self.nosmaiSDK applyWhiteBalanceWithTemperature:temperatureK tint:tint];
         self.whiteBalanceTemp = temperatureK;
         self.whiteBalanceTint = tint;
-        NSLog(@"NosmaiAgora: Applied white balance: temp=%f, tint=%f", temperatureK, tint);
         return YES;
     } @catch (NSException *exception) {
-        NSLog(@"NosmaiAgora: Failed to apply white balance: %@", exception.reason);
         return NO;
     }
 #else
@@ -841,11 +886,9 @@
         if (enabled) {
             [self.nosmaiSDK applyGrayscaleFilter];
         } else {
-            // Remove grayscale by resetting or removing the filter
             [self.nosmaiSDK removeBuiltInFilterByName:@"grayscale"];
         }
         self.grayscaleEnabled = enabled;
-        NSLog(@"NosmaiAgora: Grayscale %@", enabled ? @"enabled" : @"disabled");
         return YES;
     } @catch (NSException *exception) {
         NSLog(@"NosmaiAgora: Failed to set grayscale: %@", exception.reason);
@@ -1122,130 +1165,138 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     if (!pixelBuffer) {
         return sampleBuffer;
     }
-    
+
     // Create CIImage from pixel buffer
     CIImage *ciImage = [CIImage imageWithCVPixelBuffer:pixelBuffer];
-    
+    if (!ciImage) {
+        return sampleBuffer;
+    }
+
     // Apply horizontal flip transform
     CGAffineTransform transform = CGAffineTransformMakeScale(-1, 1);
     transform = CGAffineTransformTranslate(transform, -ciImage.extent.size.width, 0);
     CIImage *mirroredImage = [ciImage imageByApplyingTransform:transform];
-    
+
     // Create new pixel buffer
     CVPixelBufferRef newPixelBuffer = NULL;
-    CVPixelBufferCreate(kCFAllocatorDefault, 
-                       CVPixelBufferGetWidth(pixelBuffer),
-                       CVPixelBufferGetHeight(pixelBuffer),
-                       CVPixelBufferGetPixelFormatType(pixelBuffer),
-                       NULL, &newPixelBuffer);
-    
-    if (!newPixelBuffer) {
+    CVReturn status = CVPixelBufferCreate(kCFAllocatorDefault,
+                                          CVPixelBufferGetWidth(pixelBuffer),
+                                          CVPixelBufferGetHeight(pixelBuffer),
+                                          CVPixelBufferGetPixelFormatType(pixelBuffer),
+                                          NULL, &newPixelBuffer);
+
+    if (status != kCVReturnSuccess || !newPixelBuffer) {
         return sampleBuffer;
     }
-    
-    // Render mirrored image to new pixel buffer
-    CIContext *context = [CIContext context];
-    [context render:mirroredImage toCVPixelBuffer:newPixelBuffer];
-    
+
+    // ✅ Use shared CIContext instead of creating new one (CRITICAL FIX for memory leak)
+    [[self ensureCIContext] render:mirroredImage toCVPixelBuffer:newPixelBuffer];
+
     // Create new sample buffer with mirrored pixel buffer
     CMSampleBufferRef newSampleBuffer = NULL;
     CMSampleTimingInfo timingInfo = kCMTimingInfoInvalid;
     CMSampleBufferGetSampleTimingInfo(sampleBuffer, 0, &timingInfo);
-    
+
     CMVideoFormatDescriptionRef formatDescription = NULL;
     CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, newPixelBuffer, &formatDescription);
-    
-    CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault,
-                                           newPixelBuffer,
-                                           formatDescription,
-                                           &timingInfo,
-                                           &newSampleBuffer);
-    
-    // Clean up
-    CVPixelBufferRelease(newPixelBuffer);
+
     if (formatDescription) {
+        CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault,
+                                               newPixelBuffer,
+                                               formatDescription,
+                                               &timingInfo,
+                                               &newSampleBuffer);
         CFRelease(formatDescription);
     }
-    
+
+    // ✅ Always release newPixelBuffer (we created it with CVPixelBufferCreate)
+    CVPixelBufferRelease(newPixelBuffer);
+
+    // ✅ Return newSampleBuffer if successful, otherwise original
     return newSampleBuffer ? newSampleBuffer : sampleBuffer;
 }
 
 #pragma mark - Display Processed Frame
 
 - (void)displayFrameInPreview:(CVPixelBufferRef)pixelBuffer {
-    // 🛡️ CRITICAL SAFETY CHECKS - Prevent crash during cleanup
-
-    // Check 1: Verify we're not in cleanup phase (atomic check)
     if (self.isCleaningUp) {
         return;
     }
-
-    // Check 2: Validate pixelBuffer is not NULL
     if (!pixelBuffer) {
         return;
     }
+    if (self.isProcessingFrame) {
+        return;
+    }
+    self.isProcessingFrame = YES;
 
-    // Check 3: Verify preview view still exists (capture weak reference)
-    __weak UIView *weakPreviewView = _localPreviewView;
-    if (!weakPreviewView) {
+    __block UIView *currentPreviewView = nil;
+    dispatch_sync(self.previewAccessQueue, ^{
+        currentPreviewView = _localPreviewView;
+    });
+
+    if (!currentPreviewView) {
+        self.isProcessingFrame = NO;
         return;
     }
 
-    // Check 4: Retain pixelBuffer to prevent deallocation during async dispatch
     CVPixelBufferRetain(pixelBuffer);
 
-    // Convert CVPixelBuffer to UIImage and display
     dispatch_async(dispatch_get_main_queue(), ^{
-        @try {
-            // Re-check cleanup flag on main queue
-            if (self.isCleaningUp) {
-                CVPixelBufferRelease(pixelBuffer);
-                return;
-            }
-
-            // Re-check preview view on main queue
-            UIView *strongPreviewView = weakPreviewView;
-            if (!strongPreviewView) {
-                CVPixelBufferRelease(pixelBuffer);
-                return;
-            }
-
-            // Safe to process now
-            CIImage *ciImage = [CIImage imageWithCVPixelBuffer:pixelBuffer];
-            if (!ciImage) {
-                CVPixelBufferRelease(pixelBuffer);
-                return;
-            }
-
-            CIContext *context = [CIContext contextWithOptions:nil];
-            CGImageRef cgImage = [context createCGImage:ciImage fromRect:ciImage.extent];
-
-            if (cgImage) {
-                UIImage *image = [UIImage imageWithCGImage:cgImage];
-                CGImageRelease(cgImage);
-
-                // Mirror applied at capture level, not display level
-
-                // Create or update image view
-                UIImageView *imageView = (UIImageView *)[strongPreviewView viewWithTag:999];
-                if (!imageView) {
-                    imageView = [[UIImageView alloc] initWithFrame:strongPreviewView.bounds];
-                    imageView.tag = 999;
-                    imageView.contentMode = UIViewContentModeScaleAspectFill;
-                    imageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-                    [strongPreviewView addSubview:imageView];
+        @autoreleasepool {
+            @try {
+                if (self.isCleaningUp) {
+                    CVPixelBufferRelease(pixelBuffer);
+                    self.isProcessingFrame = NO;
+                    return;
                 }
-                imageView.image = image;
+
+                __block UIView *previewView = nil;
+                dispatch_sync(self.previewAccessQueue, ^{
+                    previewView = _localPreviewView;
+                });
+
+                if (!previewView) {
+                    CVPixelBufferRelease(pixelBuffer);
+                    self.isProcessingFrame = NO;
+                    return;
+                }
+
+                CIImage *ciImage = [CIImage imageWithCVPixelBuffer:pixelBuffer];
+                if (!ciImage) {
+                    CVPixelBufferRelease(pixelBuffer);
+                    self.isProcessingFrame = NO;
+                    return;
+                }
+
+                CGImageRef cgImage = [[self ensureCIContext] createCGImage:ciImage fromRect:ciImage.extent];
+
+                if (cgImage) {
+                    UIImage *image = [UIImage imageWithCGImage:cgImage];
+                    CGImageRelease(cgImage);
+
+                    UIImageView *imageView = (UIImageView *)[previewView viewWithTag:999];
+                    if (!imageView) {
+                        imageView = [[UIImageView alloc] initWithFrame:previewView.bounds];
+                        imageView.tag = 999;
+                        imageView.contentMode = UIViewContentModeScaleAspectFill;
+                        imageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+                        [previewView addSubview:imageView];
+                    } else {
+                        imageView.image = nil;
+                    }
+                    imageView.image = image;
+                }
+
+                CVPixelBufferRelease(pixelBuffer);
+
+            } @catch (NSException *exception) {
+                CVPixelBufferRelease(pixelBuffer);
+                NSLog(@"⚠️ Exception in displayFrameInPreview: %@", exception);
+            } @finally {
+                self.isProcessingFrame = NO;
             }
-
-            // Release the retained pixelBuffer
-            CVPixelBufferRelease(pixelBuffer);
-
-        } @catch (NSException *exception) {
-            // Ensure pixelBuffer is always released even on exception
-            CVPixelBufferRelease(pixelBuffer);
-            NSLog(@"⚠️ Exception in displayFrameInPreview: %@", exception);
-        }
+        } 
     });
 }
 
@@ -1337,16 +1388,29 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 - (BOOL)stopProcessing {
 #if HAS_NOSMAI_FRAMEWORK
     @try {
+        self.isProcessingFrame = NO;
+        __block UIView *previewView = nil;
+        dispatch_sync(self.previewAccessQueue, ^{
+            previewView = _localPreviewView;
+        });
+        if (previewView) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                UIImageView *imageView = (UIImageView *)[previewView viewWithTag:999];
+                if (imageView) {
+                    imageView.image = nil;  
+                }
+            });
+        }
+
         if (self.nosmaiSDK) {
             [self.nosmaiSDK stopProcessing];
         }
-        
-        // Then stop camera capture (like reference implementation)
+
         if (self.nosmaiCamera) {
             [self.nosmaiCamera stopCapture];
             [self.nosmaiCamera detachFromView];
         }
-        
+
         self.isStandaloneCameraActive = NO;
         return YES;
     } @catch (NSException *exception) {
@@ -1385,18 +1449,18 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 
 - (BOOL)flipCamera {
 #if HAS_NOSMAI_FRAMEWORK
-    
+
     if (!self.isCustomCameraActive || !self.captureDevice) {
         return NO;
     }
-    
+
     @try {
-        
+
         // Get the current camera position
         AVCaptureDevicePosition currentPosition = self.captureDevice.position;
-        AVCaptureDevicePosition newPosition = (currentPosition == AVCaptureDevicePositionFront) ? 
+        AVCaptureDevicePosition newPosition = (currentPosition == AVCaptureDevicePositionFront) ?
             AVCaptureDevicePositionBack : AVCaptureDevicePositionFront;
-        
+
         // Find the new camera device
         AVCaptureDevice *newDevice = nil;
         NSArray *devices = [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
@@ -1406,14 +1470,14 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
                 break;
             }
         }
-        
+
         if (!newDevice) {
             return NO;
         }
-        
+
         // Switch the camera device
         [self.captureSession beginConfiguration];
-        
+
         // Remove the old input
         AVCaptureDeviceInput *oldInput = nil;
         for (AVCaptureDeviceInput *input in self.captureSession.inputs) {
@@ -1422,31 +1486,30 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
                 break;
             }
         }
-        
+
         if (oldInput) {
             [self.captureSession removeInput:oldInput];
         }
-        
+
         // Add the new input
         NSError *error = nil;
         AVCaptureDeviceInput *newInput = [AVCaptureDeviceInput deviceInputWithDevice:newDevice error:&error];
         if (newInput && [self.captureSession canAddInput:newInput]) {
             [self.captureSession addInput:newInput];
             self.captureDevice = newDevice;
+
+            self.currentCameraPosition = (newPosition == AVCaptureDevicePositionFront) ?
+                NosmaiCameraPositionFront : NosmaiCameraPositionBack;
         } else {
             [self.captureSession commitConfiguration];
             return NO;
         }
-        
-        // Fix video orientation for consistent portrait mode
         [self fixVideoOrientationForCamera:newDevice];
-        
-        // Mirror state remains as user set it - no automatic change on camera flip
-        
+
         [self.captureSession commitConfiguration];
-        
+
         return YES;
-        
+
     } @catch (NSException *exception) {
         return NO;
     }
@@ -1464,7 +1527,6 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     
     @try {
         
-        // Use Agora's muteLocalAudioStream for streaming mode
         int result = [self.agoraEngine muteLocalAudioStream:muted];
         BOOL success = (result == 0);
         
@@ -1819,148 +1881,154 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 #endif
 }
 
-- (NSDictionary<NSString *, id> *)saveImageToGallery:(NSData *)imageData name:(NSString *)name {
-    
+- (void)saveImageToGalleryWithData:(NSData *)imageData name:(NSString *)name completion:(void (^)(NSDictionary<NSString *, id> *result))completion {
+
     if (!imageData) {
-        return @{
-            @"success": @NO,
-            @"error": @"Image data is required"
-        };
+        if (completion) {
+            completion(@{
+                @"success": @NO,
+                @"error": @"Image data is required"
+            });
+        }
+        return;
     }
-    
+
     // Convert data to UIImage
     UIImage *image = [UIImage imageWithData:imageData];
     if (!image) {
-        return @{
-            @"success": @NO,
-            @"error": @"Could not create image from data"
-        };
+        if (completion) {
+            completion(@{
+                @"success": @NO,
+                @"error": @"Could not create image from data"
+            });
+        }
+        return;
     }
-    
+
     // Check authorization status
     PHAuthorizationStatus status = [PHPhotoLibrary authorizationStatus];
     if (status == PHAuthorizationStatusDenied || status == PHAuthorizationStatusRestricted) {
-        return @{
-            @"success": @NO,
-            @"error": @"Photo library access denied"
-        };
+        if (completion) {
+            completion(@{
+                @"success": @NO,
+                @"error": @"Photo library access denied"
+            });
+        }
+        return;
     }
-    
+
     if (status == PHAuthorizationStatusNotDetermined) {
-        // For async operations, we'll need to modify this to use completion blocks
-        return @{
-            @"success": @NO,
-            @"error": @"Photo library permission not determined - request permission first"
-        };
+        if (completion) {
+            completion(@{
+                @"success": @NO,
+                @"error": @"Photo library permission not determined - request permission first"
+            });
+        }
+        return;
     }
-    
+
+    // ✅ Async operation without semaphore - no deadlock risk
     @try {
-        __block NSString *assetId = nil;
-        __block NSError *saveError = nil;
-        dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-        
         [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
             PHAssetChangeRequest *request = [PHAssetChangeRequest creationRequestForAssetFromImage:image];
-            assetId = request.placeholderForCreatedAsset.localIdentifier;
         } completionHandler:^(BOOL success, NSError *error) {
-            if (error) {
-                saveError = error;
+            if (completion) {
+                if (success && !error) {
+                    completion(@{
+                        @"success": @YES,
+                        @"assetId": @""
+                    });
+                } else {
+                    completion(@{
+                        @"success": @NO,
+                        @"error": error ? error.localizedDescription : @"Image save failed"
+                    });
+                }
             }
-            dispatch_semaphore_signal(semaphore);
         }];
-        
-        dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
-        
-        if (saveError) {
-                return @{
-                @"success": @NO,
-                @"error": saveError.localizedDescription
-            };
-        }
-        
-        return @{
-            @"success": @YES,
-            @"assetId": assetId ?: @""
-        };
-        
     } @catch (NSException *exception) {
-        return @{
-            @"success": @NO,
-            @"error": exception.reason ?: @"Image save failed"
-        };
+        if (completion) {
+            completion(@{
+                @"success": @NO,
+                @"error": exception.reason ?: @"Image save failed"
+            });
+        }
     }
 }
 
-- (NSDictionary<NSString *, id> *)saveVideoToGallery:(NSString *)videoPath name:(NSString *)name {
-    
+- (void)saveVideoToGalleryWithPath:(NSString *)videoPath name:(NSString *)name completion:(void (^)(NSDictionary<NSString *, id> *result))completion {
+
     if (!videoPath) {
-        return @{
-            @"success": @NO,
-            @"error": @"Video path is required"
-        };
+        if (completion) {
+            completion(@{
+                @"success": @NO,
+                @"error": @"Video path is required"
+            });
+        }
+        return;
     }
-    
+
     // Check if file exists
     if (![[NSFileManager defaultManager] fileExistsAtPath:videoPath]) {
-        return @{
-            @"success": @NO,
-            @"error": @"Video file not found"
-        };
+        if (completion) {
+            completion(@{
+                @"success": @NO,
+                @"error": @"Video file not found"
+            });
+        }
+        return;
     }
-    
+
     // Check authorization status
     PHAuthorizationStatus status = [PHPhotoLibrary authorizationStatus];
     if (status == PHAuthorizationStatusDenied || status == PHAuthorizationStatusRestricted) {
-        return @{
-            @"success": @NO,
-            @"error": @"Photo library access denied"
-        };
+        if (completion) {
+            completion(@{
+                @"success": @NO,
+                @"error": @"Photo library access denied"
+            });
+        }
+        return;
     }
-    
+
     if (status == PHAuthorizationStatusNotDetermined) {
-        return @{
-            @"success": @NO,
-            @"error": @"Photo library permission not determined - request permission first"
-        };
+        if (completion) {
+            completion(@{
+                @"success": @NO,
+                @"error": @"Photo library permission not determined - request permission first"
+            });
+        }
+        return;
     }
-    
+
     @try {
-        __block NSString *assetId = nil;
-        __block NSError *saveError = nil;
-        dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-        
         NSURL *videoURL = [NSURL fileURLWithPath:videoPath];
-        
+
         [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
             PHAssetChangeRequest *request = [PHAssetChangeRequest creationRequestForAssetFromVideoAtFileURL:videoURL];
-            assetId = request.placeholderForCreatedAsset.localIdentifier;
         } completionHandler:^(BOOL success, NSError *error) {
-            if (error) {
-                saveError = error;
+            if (completion) {
+                if (success && !error) {
+                    completion(@{
+                        @"success": @YES,
+                        @"assetId": @"",
+                        @"path": videoPath
+                    });
+                } else {
+                    completion(@{
+                        @"success": @NO,
+                        @"error": error ? error.localizedDescription : @"Video save failed"
+                    });
+                }
             }
-            dispatch_semaphore_signal(semaphore);
         }];
-        
-        dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
-        
-        if (saveError) {
-                return @{
-                @"success": @NO,
-                @"error": saveError.localizedDescription
-            };
-        }
-        
-        return @{
-            @"success": @YES,
-            @"assetId": assetId ?: @"",
-            @"path": videoPath
-        };
-        
     } @catch (NSException *exception) {
-        return @{
-            @"success": @NO,
-            @"error": exception.reason ?: @"Video save failed"
-        };
+        if (completion) {
+            completion(@{
+                @"success": @NO,
+                @"error": exception.reason ?: @"Video save failed"
+            });
+        }
     }
 }
 
@@ -2020,33 +2088,50 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 }
 
 - (BOOL)hasFlash {
-#if HAS_NOSMAI_FRAMEWORK
     @try {
-        // Check device capability using static method
-        BOOL hasFlash = [NosmaiCamera hasBackCamera]; // Assuming back camera has flash
-        return hasFlash;
+        AVCaptureDevice *currentDevice = nil;
+
+        if (self.captureDevice) {
+            currentDevice = self.captureDevice;
+        }
+#if HAS_NOSMAI_FRAMEWORK
+        else if (self.isStandaloneCameraActive && self.nosmaiCamera) {
+            NosmaiCamera *camera = [[NosmaiCore shared] camera];
+            if (camera && camera.isCapturing) {
+                NSArray *devices = [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
+                for (AVCaptureDevice *device in devices) {
+                    if (device.position == AVCaptureDevicePositionBack) {
+                        currentDevice = device;
+                        break;
+                    }
+                }
+            }
+        }
+#endif
+        else {
+            NSArray *devices = [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
+            for (AVCaptureDevice *device in devices) {
+                if (device.position == AVCaptureDevicePositionBack) {
+                    currentDevice = device;
+                    break;
+                }
+            }
+        }
+
+        if (!currentDevice) {
+            return NO;
+        }
+
+        // Return actual flash capability
+        return [currentDevice hasFlash];
+
     } @catch (NSException *exception) {
         return NO;
     }
-#endif
-    return NO;
 }
 
 - (BOOL)hasTorch {
-    // Previous Nosmai-based torch capability check (commented out)
-    /*
-#if HAS_NOSMAI_FRAMEWORK
-    @try {
-        // Check device capability using static method
-        BOOL hasTorch = [NosmaiCamera hasBackCamera]; // Assuming back camera has torch
-        return hasTorch;
-    } @catch (NSException *exception) {
-        return NO;
-    }
-#endif
-    return NO;
-    */
-    
+  
     // Native iOS torch capability check
     @try {
         // Get current capture device
@@ -2074,8 +2159,6 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 - (NSString *)getFlashMode {
 #if HAS_NOSMAI_FRAMEWORK
     @try {
-        // Note: NosmaiCamera doesn't provide getter for flash mode
-        // Return default value since we can't retrieve current state
         NSString *modeString = @"off"; // Default assumption
         return modeString;
     } @catch (NSException *exception) {
@@ -2087,22 +2170,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 }
 
 - (NSString *)getTorchMode {
-    // Previous Nosmai-based torch mode getter (commented out)
-    /*
-#if HAS_NOSMAI_FRAMEWORK
-    @try {
-        // Note: NosmaiCamera doesn't provide getter for torch mode
-        // Return default value since we can't retrieve current state
-        NSString *modeString = @"off"; // Default assumption
-        return modeString;
-    } @catch (NSException *exception) {
-        return @"off";
-    }
-#else
-    return @"off";
-#endif
-    */
-    
+
     // Native iOS torch mode getter
     @try {
         // Get current capture device
@@ -2159,7 +2227,6 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 #if HAS_NOSMAI_FRAMEWORK
     @try {
         
-        // Detach camera view without stopping camera entirely
         self.localPreviewView = nil;
         
         return YES;
@@ -2174,7 +2241,6 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 #pragma mark - NosmaiCameraDelegate Methods
 
 #if HAS_NOSMAI_FRAMEWORK
-// Add basic delegate methods to conform to NosmaiCameraDelegate protocol
 - (void)cameraDidStartCapture {
 }
 

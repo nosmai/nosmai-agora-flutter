@@ -108,8 +108,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)startRecordingWithCompletion:(void (^)(BOOL success))completion;
 - (void)stopRecordingWithCompletion:(void (^)(NSDictionary<NSString *, id> *result))completion;
 - (void)capturePhotoWithCompletion:(void (^)(NSDictionary<NSString *, id> *result))completion;
-- (NSDictionary<NSString *, id> *)saveImageToGallery:(NSData *)imageData name:(NSString *)name;
-- (NSDictionary<NSString *, id> *)saveVideoToGallery:(NSString *)videoPath name:(NSString *)name;
+- (void)saveImageToGalleryWithData:(NSData *)imageData name:(NSString *)name completion:(void (^)(NSDictionary<NSString *, id> *result))completion;
+- (void)saveVideoToGalleryWithPath:(NSString *)videoPath name:(NSString *)name completion:(void (^)(NSDictionary<NSString *, id> *result))completion;
 - (BOOL)adjustHSBWithHue:(CGFloat)hue saturation:(CGFloat)saturation brightness:(CGFloat)brightness;
 - (BOOL)resetHSBFilter;
 - (BOOL)isBeautyFilterEnabled;
