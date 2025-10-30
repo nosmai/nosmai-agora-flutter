@@ -411,9 +411,11 @@
         self.allowPush = NO;
         self.currentChannelId = nil;
         self.currentUserId = 0;
-        
+
+        [self clearPreviewViewAndCaches];
+
         return YES;
-        
+
     } @catch (NSException *exception) {
         return NO;
     }
@@ -424,19 +426,6 @@
     self.allowPush = NO;
     self.channelJoined = NO;
     self.isProcessingFrame = NO; 
-
-    __block UIView *previewView = nil;
-    dispatch_sync(self.previewAccessQueue, ^{
-        previewView = _localPreviewView;
-    });
-    if (previewView) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            UIImageView *imageView = (UIImageView *)[previewView viewWithTag:999];
-            if (imageView) {
-                imageView.image = nil; 
-            }
-        });
-    }
 
     [self stopCamera];
     [NSThread sleepForTimeInterval:0.8];
@@ -464,7 +453,7 @@
     self.currentUserId = 0;
     self.isCustomCameraActive = NO;
 
-    self.sharedCIContext = nil;
+    [self clearPreviewViewAndCaches];
 
     self.isCleaningUp = NO;
 
@@ -480,6 +469,39 @@
         }];
     }
     return self.sharedCIContext;
+}
+
+- (void)clearPreviewViewAndCaches {
+    __block UIView *previewView = nil;
+    dispatch_sync(self.previewAccessQueue, ^{
+        previewView = _localPreviewView;
+        _localPreviewView = nil;
+    });
+
+#if HAS_NOSMAI_FRAMEWORK
+    if (self.nosmaiSDK) {
+        [self.nosmaiSDK setPreviewView:nil];
+        [self.nosmaiSDK setCVPixelBufferCallback:nil];
+        [self.nosmaiSDK setLiveFrameOutputEnabled:NO];
+    }
+#endif
+
+    if (previewView) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIImageView *imageView = (UIImageView *)[previewView viewWithTag:999];
+            if (imageView) {
+                imageView.image = nil;
+                [imageView removeFromSuperview];
+            }
+        });
+    }
+
+    if (self.sharedCIContext) {
+        [self.sharedCIContext clearCaches];
+        self.sharedCIContext = nil;
+    }
+
+    self.isProcessingFrame = NO;
 }
 
 #pragma mark - Camera Management
@@ -557,6 +579,7 @@
     if (self.nosmaiCamera) {
         [self.nosmaiCamera stopCapture];
         [self.nosmaiCamera detachFromView];
+        [self.nosmaiCamera setDelegate:nil];
         self.nosmaiCamera = nil;
     }
 #endif
@@ -1394,18 +1417,6 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 #if HAS_NOSMAI_FRAMEWORK
     @try {
         self.isProcessingFrame = NO;
-        __block UIView *previewView = nil;
-        dispatch_sync(self.previewAccessQueue, ^{
-            previewView = _localPreviewView;
-        });
-        if (previewView) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                UIImageView *imageView = (UIImageView *)[previewView viewWithTag:999];
-                if (imageView) {
-                    imageView.image = nil;  
-                }
-            });
-        }
 
         if (self.nosmaiSDK) {
             [self.nosmaiSDK stopProcessing];
@@ -1414,8 +1425,11 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         if (self.nosmaiCamera) {
             [self.nosmaiCamera stopCapture];
             [self.nosmaiCamera detachFromView];
+            [self.nosmaiCamera setDelegate:nil];
+            self.nosmaiCamera = nil;
         }
 
+        [self clearPreviewViewAndCaches];
         self.isStandaloneCameraActive = NO;
         return YES;
     } @catch (NSException *exception) {

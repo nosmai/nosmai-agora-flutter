@@ -67,9 +67,7 @@ public class NosmaiAgoraBridge {
     private static final String FILTERS_PREFIX = "assets/filters/";
     private static final String CACHE_DIR_NAME = "NosmaiLocalFilters";
 
-    // Face Detection optimization: skip frames for better performance
-    // 1 = every frame (30 FPS), 2 = every 2nd frame (15 FPS), 3 = every 3rd frame (10 FPS)
-    private static final int FD_SKIP_FRAMES = 3;
+    private static final int FD_SKIP_FRAMES = 4;
 
     private static NosmaiAgoraBridge instance;
 

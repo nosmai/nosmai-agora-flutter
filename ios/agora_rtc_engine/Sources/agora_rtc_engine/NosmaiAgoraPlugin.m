@@ -17,13 +17,26 @@
 
 @implementation NosmaiAgoraPlugin
 
+static __weak NosmaiAgoraPlugin *sSharedPlugin = nil;
+
 + (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
     FlutterMethodChannel* channel = [FlutterMethodChannel
         methodChannelWithName:@"nosmai_agora"
               binaryMessenger:[registrar messenger]];
     NosmaiAgoraPlugin* instance = [[NosmaiAgoraPlugin alloc] init];
     instance.channel = channel;
+    sSharedPlugin = instance;
     [registrar addMethodCallDelegate:instance channel:channel];
+}
+
++ (void)detachFromEngineForRegistrar:(NSObject<FlutterPluginRegistrar> *)registrar {
+    NosmaiAgoraPlugin *plugin = sSharedPlugin;
+    if (plugin.channel) {
+        [plugin.channel setMethodCallHandler:nil];
+        plugin.channel = nil;
+    }
+    [[NosmaiAgoraBridge sharedInstance] teardownStreaming];
+    sSharedPlugin = nil;
 }
 
 - (void)handleMethodCall:(FlutterMethodCall*)call result:(FlutterResult)result {
@@ -710,56 +723,28 @@
                     filterInfo[@"category"] = filterMetadata[@"category"];
                 }
             } else {
-                
-                // Comprehensive keyword-based classification (following Agora implementation)
+
+                // ✅ Hardcoded classification based on known filter names
                 NSString *lowercaseName = [filterName lowercaseString];
-                
-                // Filter keywords (color/tone adjustments, artistic filters)
-                NSArray *filterKeywords = @[@"filter", @"vintage", @"retro", @"warm", @"cool", @"bright", @"dark", 
-                                           @"sepia", @"mono", @"contrast", @"vivid", @"soft", @"sharp",
-                                           @"lomo", @"film", @"analog", @"classic", @"noir", @"bw",
-                                           @"color", @"tone", @"hue", @"saturation", @"exposure", @"shadow",
-                                           @"highlight", @"clarity", @"vibrance", @"temperature", @"tint",
-                                           @"fade", @"grain", @"vignette", @"blur", @"invert", @"light", @"leak",
-                                           @"prism", @"ascii", @"art", @"grid", @"quad", @"crisp"];
-                
-                // Effect keywords (dramatic transformations, overlays)
-                NSArray *effectKeywords = @[@"effect", @"transform", @"distort", @"warp", @"glitch", @"neon",
-                                           @"glow", @"sparkle", @"particle", @"fire", @"water", @"smoke",
-                                           @"magic", @"fantasy", @"sci-fi", @"hologram", @"mirror", @"kaleidoscope",
-                                           @"explosion", @"shatter", @"dissolve", @"morph", @"portal"];
-                
-                BOOL isFilter = NO;
+
+                // Known effect names
+                NSArray *effectNames = @[@"ascii_art", @"rainbow", @"quad", @"quad_effects_grid", @"prism_light_leak"];
+
                 BOOL isEffect = NO;
-                
-                // Check for filter keywords
-                for (NSString *keyword in filterKeywords) {
-                    if ([lowercaseName containsString:keyword]) {
-                        isFilter = YES;
+                for (NSString *effectName in effectNames) {
+                    if ([lowercaseName isEqualToString:effectName]) {
+                        isEffect = YES;
                         break;
                     }
                 }
-                
-                // Check for effect keywords (only if not already classified as filter)
-                if (!isFilter) {
-                    for (NSString *keyword in effectKeywords) {
-                        if ([lowercaseName containsString:keyword]) {
-                            isEffect = YES;
-                            break;
-                        }
-                    }
-                }
-                
-                if (isFilter) {
-                    filterType = @"filter";
-                    filterCategory = @"filter";
-                } else if (isEffect) {
+
+                if (isEffect) {
                     filterType = @"effect";
                     filterCategory = @"effect";
                 } else {
-                    // Default to effect if can't determine
-                    filterType = @"effect";
-                    filterCategory = @"effect";
+                    // Everything else is a filter
+                    filterType = @"filter";
+                    filterCategory = @"filter";
                 }
             }
             
