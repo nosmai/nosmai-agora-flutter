@@ -2422,6 +2422,7 @@ public class NosmaiAgoraBridge {
      */
     public boolean setTorchMode(String mode) {
         try {
+
             if (camera2Helper == null) {
                 Log.w(TAG, "Camera2Helper not initialized, cannot set torch");
                 return false;
@@ -2430,9 +2431,7 @@ public class NosmaiAgoraBridge {
             // Handle auto mode same as on (since Camera2 doesn't have native auto mode for torch)
             boolean enable = "on".equalsIgnoreCase(mode) || "auto".equalsIgnoreCase(mode);
 
-
             camera2Helper.setTorchMode(enable);
-            Log.i(TAG, "✅ Torch mode set successfully: " + mode);
             return true;
         } catch (Exception e) {
             Log.e(TAG, "Error setting torch mode", e);

@@ -469,13 +469,16 @@ public class NosmaiAgoraPlugin implements FlutterPlugin, MethodCallHandler {
         }
 
         else if ("setFlashMode".equals(call.method)) {
-            String mode = call.argument("mode");
+            // 🔦 FIX: Use correct parameter name 'flashMode' (not 'mode')
+            String mode = call.argument("flashMode");
             boolean success = bridge.setFlashMode(mode != null ? mode : "off");
             result.success(success);
         }
 
         else if ("setTorchMode".equals(call.method)) {
-            String mode = call.argument("mode");
+            // 🔦 FIX: Use correct parameter name 'torchMode' (not 'mode')
+            String mode = call.argument("torchMode");
+            Log.d("NosmaiAgoraPlugin", "🔦 [Plugin] setTorchMode called with mode: " + mode);
             boolean success = bridge.setTorchMode(mode != null ? mode : "off");
             result.success(success);
         }
